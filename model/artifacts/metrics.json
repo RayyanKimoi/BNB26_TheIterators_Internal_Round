@@ -2,7 +2,7 @@
   "test_seen_top1": 0.95,
   "test_seen_top3": 1.0,
   "test_seen_runs": 20,
-  "test_heldout_top1": 0.075,
+  "test_heldout_top1": 0.1,
   "test_heldout_top3": 0.35,
   "test_heldout_runs": 40,
   "class_hallucinated_argument_top1": 1.0,
@@ -10,7 +10,7 @@
   "class_schema_violation_top1": 1.0,
   "class_stale_retrieval_top1": 1.0,
   "class_wrong_tool_chosen_top1": 0.75,
-  "class_context_truncation_top1": 0.15,
+  "class_context_truncation_top1": 0.2,
   "class_infinite_loop_top1": 0.0,
   "loco_schema_violation": 0.3,
   "loco_stale_retrieval": 0.2857142857142857,
@@ -28,5 +28,5 @@
   "test_seen_class_accuracy_when_named": 1.0,
   "test_heldout_named_rate": 0.15,
   "test_heldout_class_accuracy_when_named": 0.0,
-  "false_positive_rate": 0.3157894736842105
+  "false_positive_rate": 0.3684210526315789
 }
