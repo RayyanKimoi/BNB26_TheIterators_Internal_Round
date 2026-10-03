@@ -177,7 +177,16 @@ export interface ForkResponse {
   diagnosis: DiagnosisResponse | null;
 }
 
-export interface EvaluationResponse {
+/**
+ * The evaluation artifact itself (model/artifacts/evaluation.json), nested one
+ * level under the `evaluation` key of GET /model/evaluation's response. There
+ * is no backend Pydantic model for this: the endpoint serves the JSON file
+ * verbatim (`dict[str, Any]`), so `scripts/check-contract.mjs` cannot verify
+ * this shape against source the way it does the diagnosis contract. Keep this
+ * in sync by hand against `model/artifacts/evaluation.json` if that artifact's
+ * shape ever changes.
+ */
+export interface EvaluationArtifact {
   test_seen_top1: number;
   test_seen_top3: number;
   test_heldout_top1: number;
@@ -187,12 +196,28 @@ export interface EvaluationResponse {
   /** e.g. `{ "last step": { seen: 0.1, heldout: 0.075 } }` */
   baselines: Record<string, Record<string, number>>;
   loco_mean: number | null;
-  /** The RAW model gate. False on the current corpus. Show it alongside the hybrid. */
-  gate_passed: boolean;
+  /** The RAW model gate, before the hybrid fallback. False on this corpus. */
+  raw_gate_passed: boolean;
   hybrid_seen_top1: number | null;
   hybrid_heldout_top1: number | null;
+  /** Keys are `{class}_seen` or `{class}_heldout`, each a top-1 rate. */
   hybrid_per_class: Record<string, number> | null;
   hybrid_gate_passed: boolean | null;
+  /** True once the hybrid engine clears its gate; the headline pass/fail. */
+  gate_passed: boolean;
+}
+
+/**
+ * GET /model/evaluation serves two artifacts verbatim, nested under these two
+ * keys. `metrics` is model/artifacts/metrics.json: a flat, open-ended set of
+ * numeric readings (per-class top-1, per-class LOCO, baseline comparisons,
+ * named-rate and false-positive-rate figures) whose exact keys depend on which
+ * failure classes exist in the corpus, so it is typed as a dictionary rather
+ * than an exhaustive interface.
+ */
+export interface EvaluationResponse {
+  evaluation: EvaluationArtifact;
+  metrics: Record<string, number>;
 }
 
 /**

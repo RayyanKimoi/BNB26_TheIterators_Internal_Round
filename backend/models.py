@@ -183,23 +183,14 @@ class RunDetail(BaseModel):
     diagnosis: DiagnosisResponse | None = None
 
 
-class EvaluationResponse(BaseModel):
-    """Model evaluation metrics served by GET /model/evaluation."""
-
-    test_seen_top1: float
-    test_seen_top3: float
-    test_heldout_top1: float
-    test_heldout_top3: float
-    test_seen_runs: int
-    test_heldout_runs: int
-    baselines: dict[str, dict[str, float]]
-    loco_mean: float | None = None
-    gate_passed: bool
-    # Hybrid engine metrics
-    hybrid_seen_top1: float | None = None
-    hybrid_heldout_top1: float | None = None
-    hybrid_per_class: dict[str, float] | None = None
-    hybrid_gate_passed: bool | None = None
+# Note: there is deliberately no EvaluationResponse model here. GET
+# /model/evaluation serves model/artifacts/evaluation.json and metrics.json
+# verbatim as `{"evaluation": {...}, "metrics": {...}}` (see main.py); a prior
+# version of this file declared a flat Pydantic shape for that endpoint that
+# the endpoint never actually used, which let the frontend contract drift
+# silently out of sync with the real response. frontend/src/types/api.ts
+# documents the real nested shape directly instead of mirroring a model that
+# does not exist on the wire.
 
 
 # ---------------------------------------------------------------------------

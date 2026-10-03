@@ -23,7 +23,6 @@ from backend.engine import create_db_and_tables, get_session
 from backend.explainer import ExplainerClient, GeminiExplainer, explain
 from backend.models import (
     DiagnosisResponse,
-    EvaluationResponse,
     ExplainRequest,
     ExplanationResponse,
     ForkRequest,

@@ -7,6 +7,8 @@
  * model/artifacts/evaluation.json; see the constants below.
  */
 
+import { motion, useReducedMotion } from 'framer-motion';
+import type { Variants } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 
 import { api, ApiError } from '../api/client';
@@ -18,6 +20,7 @@ import { CLEAN_CLASS, EMPTY_FILTERS } from '../config/runFilters';
 import type { RunTableFilters } from '../config/runFilters';
 import { useToast } from '../hooks/useToast';
 import type { RunSummary } from '../types/api';
+import { TraceView } from './TraceView';
 
 /*
  * Measured on the held-out evaluation, not estimated. Sourced from
@@ -35,6 +38,7 @@ function distinct(values: (string | null)[]): string[] {
 
 export function RunsView() {
   const toast = useToast();
+  const reduced = useReducedMotion();
 
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +46,7 @@ export function RunsView() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const [filters, setFilters] = useState<RunTableFilters>(EMPTY_FILTERS);
+  const [inspectingId, setInspectingId] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,9 +113,7 @@ export function RunsView() {
   }, [runs]);
 
   const onInspect = (run: RunSummary) => {
-    // The trace inspector is Step 3. Until then, acknowledge the selection
-    // honestly rather than opening a view that does not exist yet.
-    toast.push('info', `Trace inspector ships in Step 3. Selected run ${run.id.slice(0, 8)}.`);
+    setInspectingId(run.id);
   };
 
   const retry = () => {
@@ -121,12 +124,36 @@ export function RunsView() {
     setReloadKey((k) => k + 1);
   };
 
+  if (inspectingId) {
+    return (
+      <TraceView
+        runId={inspectingId}
+        onBack={() => setInspectingId(null)}
+        onNavigateToRun={setInspectingId}
+      />
+    );
+  }
+
   if (error) {
     return <ErrorState error={error} onRetry={retry} />;
   }
 
+  const container: Variants = {
+    hidden: {},
+    show: { transition: { staggerChildren: reduced ? 0 : 0.08 } },
+  };
+  const item: Variants = {
+    hidden: reduced ? { opacity: 0 } : { opacity: 0, y: 12 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
+  };
+
   return (
-    <div className="flex flex-col gap-4">
+    <motion.div
+      variants={container}
+      initial="hidden"
+      animate="show"
+      className="flex flex-col gap-4"
+    >
       <MetricsHeader
         totalRuns={runs.length}
         trainedAccuracy={TRAINED_CLASS_ACCURACY}
@@ -135,26 +162,30 @@ export function RunsView() {
         loading={loading}
       />
 
-      <FilterBar
-        filters={filters}
-        onChange={setFilters}
-        taskTypes={taskTypes}
-        faultClasses={faultClasses}
-        hasClean={hasClean}
-        shown={filtered.length}
-        total={runs.length}
-      />
-
-      {!loading && runs.length === 0 ? (
-        <EmptyState
-          title="No runs in the database yet"
-          hint="Load the synthetic corpus into Supabase, then reload. GET /runs returned an empty list."
+      <motion.div variants={item}>
+        <FilterBar
+          filters={filters}
+          onChange={setFilters}
+          taskTypes={taskTypes}
+          faultClasses={faultClasses}
+          hasClean={hasClean}
+          shown={filtered.length}
+          total={runs.length}
         />
-      ) : !loading && filtered.length === 0 ? (
-        <EmptyState title="No runs match these filters" hint="Clear a filter or widen the search." />
-      ) : (
-        <RunsTable runs={filtered} loading={loading} onInspect={onInspect} />
-      )}
-    </div>
+      </motion.div>
+
+      <motion.div variants={item}>
+        {!loading && runs.length === 0 ? (
+          <EmptyState
+            title="No runs in the database yet"
+            hint="Load the synthetic corpus into Supabase, then reload. GET /runs returned an empty list."
+          />
+        ) : !loading && filtered.length === 0 ? (
+          <EmptyState title="No runs match these filters" hint="Clear a filter or widen the search." />
+        ) : (
+          <RunsTable runs={filtered} loading={loading} onInspect={onInspect} />
+        )}
+      </motion.div>
+    </motion.div>
   );
 }

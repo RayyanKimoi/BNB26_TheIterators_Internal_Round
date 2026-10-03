@@ -17,7 +17,19 @@ const here = dirname(fileURLToPath(import.meta.url));
 const MODELS_PY = resolve(here, '../../backend/models.py');
 const TYPES_TS = resolve(here, '../src/types/api.ts');
 
-/** Pydantic classes to compare, mapped to their TypeScript interface. */
+/**
+ * Pydantic classes to compare, mapped to their TypeScript interface.
+ *
+ * EvaluationResponse is deliberately absent: GET /model/evaluation serves
+ * model/artifacts/evaluation.json and metrics.json verbatim as a raw dict, not
+ * through a Pydantic response_model, so there is no source-of-truth class to
+ * check `EvaluationArtifact`/`EvaluationResponse` against here. A Pydantic
+ * class by that name used to exist and this checker passed against it for
+ * months while the live endpoint quietly returned a different shape — exactly
+ * the silent drift this file exists to catch, missed because the class was
+ * never wired to the route. Keep EvaluationArtifact in sync with the real
+ * artifact file by hand instead.
+ */
 const PAIRS = [
   ['DiagnosisResponse', 'DiagnosisResponse'],
   ['SuggestedFix', 'SuggestedFix'],
@@ -28,7 +40,6 @@ const PAIRS = [
   ['ExplanationPayload', 'ExplanationPayload'],
   ['ForkRequest', 'ForkRequest'],
   ['ForkResponse', 'ForkResponse'],
-  ['EvaluationResponse', 'EvaluationResponse'],
 ];
 
 /** Interfaces that extend another, whose inherited fields are declared there. */

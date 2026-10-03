@@ -42,7 +42,9 @@ export function ParticleText({
   const [staticMode, setStaticMode] = useState(true);
 
   useEffect(() => {
-    const narrow = window.matchMedia('(max-width: 640px)');
+    // Only run the fixed-width canvas where the container is wide enough for a
+    // large wordmark; below that fall back to responsive text.
+    const narrow = window.matchMedia('(max-width: 1023px)');
     const update = () => setStaticMode(reduced || narrow.matches);
     update();
     narrow.addEventListener('change', update);
@@ -150,7 +152,13 @@ export function ParticleText({
     return (
       <span
         className={className}
-        style={{ fontSize, fontWeight: weight, fontFamily, color, lineHeight: 1.05 }}
+        style={{
+          fontSize: `clamp(44px, 13vw, ${fontSize}px)`,
+          fontWeight: weight,
+          fontFamily,
+          color,
+          lineHeight: 1.02,
+        }}
       >
         {text}
       </span>

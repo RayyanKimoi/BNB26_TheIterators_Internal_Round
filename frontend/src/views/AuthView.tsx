@@ -12,13 +12,13 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 
-import { PixelField } from '../components/effects/PixelField';
+import { ClosingPlasma } from '../components/ui/ClosingPlasma';
 import { useAuth } from '../context/authCore';
 
 type Mode = 'signin' | 'signup';
 
 export function AuthView({ onBack }: { onBack: () => void }) {
-  const { login, loginAsGuest } = useAuth();
+  const { login, register, loginAsGuest } = useAuth();
   const reduced = useReducedMotion();
 
   const [mode, setMode] = useState<Mode>('signin');
@@ -32,7 +32,8 @@ export function AuthView({ onBack }: { onBack: () => void }) {
     setError(null);
     setLoading(true);
     try {
-      await login(email, password);
+      if (mode === 'signup') await register(email, password);
+      else await login(email, password);
       // Success unmounts this view; leave the button in its loading state.
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not sign in.');
@@ -47,14 +48,32 @@ export function AuthView({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-bg px-4">
-      <PixelField className="pointer-events-none absolute inset-0 h-full w-full opacity-60" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-bg/30 via-bg/50 to-bg" />
+      <ClosingPlasma className="pointer-events-none absolute inset-0 h-full w-full opacity-70" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-bg/40 via-bg/55 to-bg" />
+
+      <button
+        type="button"
+        onClick={onBack}
+        className="data hairline absolute left-4 top-4 z-10 inline-flex items-center gap-2 rounded bg-panel/80 px-3 py-2 text-text backdrop-blur transition-colors hover:border-accent/60 hover:text-accent sm:left-6 sm:top-6"
+      >
+        <svg viewBox="0 0 16 16" className="size-3.5" aria-hidden="true">
+          <path
+            d="M10 3l-5 5 5 5"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        Back to home
+      </button>
 
       <motion.div
         initial={reduced ? { opacity: 0 } : { opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: 'easeOut' }}
-        className="hairline relative w-full max-w-sm bg-panel/90 p-6 backdrop-blur"
+        className="hairline relative w-full max-w-md bg-panel/90 p-7 backdrop-blur"
       >
         <div className="flex items-center gap-2">
           <span className="dot-matrix hairline block size-5" aria-hidden="true" />
@@ -111,10 +130,16 @@ export function AuthView({ onBack }: { onBack: () => void }) {
               value={password}
               autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="at least 6 characters"
+              placeholder={mode === 'signup' ? 'at least 6 characters' : 'your password'}
               className="hairline rounded bg-bg px-3 py-2 font-mono text-[13px] text-text placeholder:text-muted focus:border-accent/60 focus-visible:outline-none"
             />
           </label>
+
+          {mode === 'signin' && (
+            <p className="data -mt-1 text-muted">
+              No account yet? Switch to Create Account above.
+            </p>
+          )}
 
           <AnimatePresence initial={false}>
             {error && (
@@ -135,7 +160,13 @@ export function AuthView({ onBack }: { onBack: () => void }) {
             disabled={loading}
             className="mt-1 rounded border border-accent bg-accent/10 px-4 py-2.5 text-[14px] font-medium text-accent transition-colors hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? 'Signing in...' : mode === 'signin' ? 'Sign In' : 'Create Account'}
+            {loading
+              ? mode === 'signup'
+                ? 'Creating account...'
+                : 'Signing in...'
+              : mode === 'signin'
+                ? 'Sign In'
+                : 'Create Account'}
           </button>
         </form>
 
@@ -150,20 +181,13 @@ export function AuthView({ onBack }: { onBack: () => void }) {
           onClick={loginAsGuest}
           className="hairline w-full rounded px-4 py-2.5 text-[14px] text-text transition-colors hover:border-accent/60 hover:text-accent"
         >
-          Continue as Guest / Demo Mode
+          Instant Demo Access (Guest)
         </button>
 
         <p className="data mt-4 leading-relaxed text-muted">
-          Local demo session. There is no auth server; nothing you type leaves your browser.
+          Local demo session: accounts are stored hashed in this browser, not on a server.
+          Nothing you type leaves your device.
         </p>
-
-        <button
-          type="button"
-          onClick={onBack}
-          className="data mt-4 text-muted transition-colors hover:text-accent"
-        >
-          Back to home
-        </button>
       </motion.div>
     </div>
   );

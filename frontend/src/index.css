@@ -120,6 +120,36 @@
 }
 
 /*
+ * Glowing mint focus/hover treatment for text inputs, search fields and
+ * textareas, applied globally so every current and future form field matches
+ * without per-component classes drifting. Deliberately unlayered (outside any
+ * @layer) so it wins over Tailwind's own utility layer, which some inputs also
+ * set a border-color on directly. Range, checkbox and radio inputs are
+ * excluded: a glowing border reads as broken on those native controls.
+ */
+input:not([type='range']):not([type='checkbox']):not([type='radio']),
+textarea,
+select {
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+input:not([type='range']):not([type='checkbox']):not([type='radio']):hover,
+textarea:hover,
+select:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 12px rgba(125, 249, 196, 0.18);
+}
+
+input:not([type='range']):not([type='checkbox']):not([type='radio']):focus,
+textarea:focus,
+select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 12px rgba(125, 249, 196, 0.25);
+}
+
+/*
  * Honour prefers-reduced-motion everywhere. Required by CLAUDE.md, and far
  * cheaper to establish now than to retrofit across every animated component.
  * Framer Motion reads the same media query via useReducedMotion().

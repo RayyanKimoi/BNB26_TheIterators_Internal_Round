@@ -1,17 +1,18 @@
 import { useState } from 'react';
 
-import { AppShell, EmptyState } from './components/AppShell';
+import { AppShell } from './components/AppShell';
 import type { TabId } from './config/tabs';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/authCore';
 import { AuthView } from './views/AuthView';
 import { LandingView } from './views/LandingView';
+import { ModelBenchmarks } from './views/ModelBenchmarks';
 import { RunsView } from './views/RunsView';
 
 /**
  * Unauthenticated visitors see the landing page, with the auth view one click
- * away. Once a session exists (real or demo) the dashboard shell takes over. The
- * runs dashboard is live (Step 2); later tabs still show a placeholder.
+ * away. Once a session exists (real or demo) the dashboard shell takes over.
+ * Both dashboard tabs are live.
  */
 function Root() {
   const { isAuthenticated } = useAuth();
@@ -28,14 +29,7 @@ function Root() {
 
   return (
     <AppShell activeTab={tab} onTabChange={setTab}>
-      {tab === 'runs' ? (
-        <RunsView />
-      ) : (
-        <EmptyState
-          title="Model benchmarks not built yet"
-          hint="Reads GET /model/evaluation and shows held-out accuracy against all four baselines."
-        />
-      )}
+      {tab === 'runs' ? <RunsView /> : <ModelBenchmarks />}
     </AppShell>
   );
 }
