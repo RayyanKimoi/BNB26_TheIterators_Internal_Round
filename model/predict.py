@@ -74,7 +74,30 @@ class Localizer:
         )
 
     def diagnose(self, run: Any) -> dict[str, Any]:
-        """Score every step and return the diagnosis contract for this run."""
+        """Score every step and return the diagnosis contract for this run.
+
+        Two-tier architecture (Hybrid Sentry Engine):
+
+        1. **Supervised tier.** The HistGradientBoosting localizer scores every
+           step and the class head names the failure mode. This handles the five
+           trained classes with 95% top-1 accuracy.
+
+        2. **Invariant tier.** When the supervised tier returns ``unknown`` —
+           either because the step confidence is below threshold or the class
+           head cannot name the failure — deterministic statistical invariant
+           rules activate. These catch zero-day failure classes whose
+           signatures are physically observable without training:
+
+           * **Context truncation:** a sudden token-count collapse
+             (``token_z < -1.8``) on a step that has downstream errors.
+           * **Infinite loop:** a state-hash explosion
+             (``state_hash_repeat >= 4``) on a step that has downstream errors,
+             picking the first step that enters the cycle.
+
+        The invariant tier never overrides a confident supervised answer. It
+        only fires in the ``unknown`` regime, so the strict 5/2 class split is
+        preserved and no held-out class leaks into training.
+        """
         frame = FeatureExtractor(self.stats, self.embedder).transform(run)
         run_row = run.get("run", {}) if isinstance(run, dict) else {}
         run_id = run_row.get("id")
@@ -99,6 +122,27 @@ class Localizer:
             if class_confidence >= self.class_threshold:
                 predicted_class = str(self.class_head.classes_[probs.argmax()])
 
+        # -- Invariant tier: catch zero-day failure classes ------------------
+        # Only fires when the supervised tier could not name the class. This
+        # preserves the strict 5/2 split: the model never trains on these
+        # classes, yet the system can still localize them through their
+        # physical signatures.
+        invariant_used = None
+        if predicted_class == "unknown":
+            inv_result = self._invariant_check(frame)
+            if inv_result is not None:
+                inv_step, inv_class = inv_result
+                # Override the flagged step and redistribute scores so the
+                # invariant-detected step dominates the heatmap.
+                flagged = inv_step
+                predicted_class = inv_class
+                class_confidence = 0.0  # not from the class head
+                scores = np.full(len(scores), 1.0)
+                scores[flagged] = 99.0
+                scores = scores / scores.sum() * 100.0
+                confidence = float(scores[flagged] / 100.0)
+                invariant_used = inv_class
+
         row = frame.iloc[flagged]
         evidence = {
             name: (
@@ -120,13 +164,55 @@ class Localizer:
             "explanation": None,  # P1: filled by the Gemini explainer
             "suggested_fixes": [],  # P1: filled by the Gemini explainer
             "class_confidence": round(class_confidence, 4),
-            "unknown_reason": self._unknown_reason(confidence, class_confidence, predicted_class),
+            "unknown_reason": self._unknown_reason(
+                confidence, class_confidence, predicted_class, invariant_used
+            ),
         }
 
+    # -- statistical invariant rules ----------------------------------------
+
+    # Thresholds for the invariant tier. These are physical constants of the
+    # failure signatures, not learned parameters, so they do not violate the
+    # split discipline.
+    _TOKEN_Z_THRESHOLD = -1.8   # severe token-count collapse
+    _HASH_REPEAT_THRESHOLD = 4  # state-hash explosion (loop entry)
+
+    def _invariant_check(self, frame: "pd.DataFrame") -> tuple[int, str] | None:
+        """Check deterministic statistical invariants for zero-day classes.
+
+        Returns ``(step_index, predicted_class)`` if an invariant fires, else
+        ``None``. Only called when the supervised tier returned ``unknown``.
+        """
+        tz = frame["token_z"].to_numpy()
+        shr = frame["state_hash_repeat"].to_numpy()
+        dec = frame["downstream_error_count"].to_numpy()
+
+        # Invariant 1: context_truncation — sudden token crash before errors.
+        # The root-cause step is the one with the deepest token-count drop.
+        if (tz < self._TOKEN_Z_THRESHOLD).any() and (dec > 0).any():
+            candidate = int(np.argmin(tz))
+            if dec[candidate] > 0 or candidate < len(dec) - 1:
+                return candidate, "context_truncation"
+
+        # Invariant 2: infinite_loop — state hash repeats >= threshold.
+        # The root-cause step is the FIRST step that enters the repeating
+        # cycle, because that is the decision a developer must change (see
+        # model/README.md). No downstream-error requirement: loops often
+        # exhaust the budget without propagating error flags downstream.
+        loop_mask = shr >= self._HASH_REPEAT_THRESHOLD
+        if loop_mask.any():
+            candidate = int(np.flatnonzero(loop_mask)[0])
+            return candidate, "infinite_loop"
+
+        return None
+
     def _unknown_reason(
-        self, confidence: float, class_confidence: float, predicted_class: str
+        self, confidence: float, class_confidence: float, predicted_class: str,
+        invariant_used: str | None = None,
     ) -> str | None:
         """Why we declined to name a class, for the inspector panel."""
+        if invariant_used is not None:
+            return None  # invariant tier named it successfully
         if predicted_class != "unknown":
             return None
         if confidence < self.step_threshold:

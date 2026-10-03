@@ -29,9 +29,12 @@ Full spec is in PRD.md. Read the relevant section before building. This file is 
   "predicted_class": "stale_retrieval",
   "evidence_path": "step[14].output.currency",
   "evidence": {"semantic_deviation": 0.71, "duration_z": 2.4, "arg_novelty": 0.0},
+  "shap": {"semantic_deviation": 0.31, "retrieval_similarity": 0.24, "duration_z": 0.12},
   "step_scores": [2, 4, 1, 88, 11],
   "explanation": "...",
-  "suggested_fixes": [{"rank": 1, "patch": {}, "rationale": "..."}]
+  "suggested_fixes": [{"rank": 1, "patch": {}, "rationale": "..."}],
+  "class_confidence": 0.92,
+  "unknown_reason": null
 }
 
 ## Design tokens

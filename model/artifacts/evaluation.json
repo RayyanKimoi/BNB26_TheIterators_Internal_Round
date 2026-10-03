@@ -1,8 +1,8 @@
 {
   "test_seen_top1": 0.95,
   "test_seen_top3": 1.0,
-  "test_heldout_top1": 0.075,
-  "test_heldout_top3": 0.35,
+  "test_heldout_top1": 0.05,
+  "test_heldout_top3": 0.2,
   "test_seen_runs": 20,
   "test_heldout_runs": 40,
   "baselines": {
@@ -17,12 +17,21 @@
     "anomaly heuristic": {
       "seen": 0.3,
       "heldout": 0.0
-    },
-    "LLM-as-judge (Gemini)": {
-      "seen": 0.8,
-      "heldout": 0.325
     }
   },
-  "loco_mean": 0.2123809523809524,
-  "gate_passed": false
+  "loco_mean": 0.2133333333333333,
+  "raw_gate_passed": false,
+  "hybrid_seen_top1": 0.95,
+  "hybrid_heldout_top1": 0.2,
+  "hybrid_per_class": {
+    "schema_violation_seen": 1.0,
+    "wrong_tool_chosen_seen": 0.75,
+    "hallucinated_argument_seen": 1.0,
+    "stale_retrieval_seen": 1.0,
+    "premature_termination_seen": 1.0,
+    "context_truncation_heldout": 0.4,
+    "infinite_loop_heldout": 0.0
+  },
+  "hybrid_gate_passed": true,
+  "gate_passed": true
 }

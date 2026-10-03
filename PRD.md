@@ -277,11 +277,13 @@ One row per step per diagnosis. This is what makes the heatmap show near-misses 
   "explanation": "Step 14 returned a cached rate quote from an earlier query...",
   "suggested_fixes": [
     {"rank": 1, "patch": {"...": "..."}, "rationale": "..."}
-  ]
+  ],
+  "class_confidence": 0.92,
+  "unknown_reason": null
 }
 ```
 
-`predicted_class` is `"unknown"` when confidence is below threshold. `shap` carries the model-level feature attributions, `evidence` the raw values; the inspector shows both, and the explainer prompt is seeded from them.
+`predicted_class` is `"unknown"` when confidence is below threshold. `shap` carries the model-level feature attributions, `evidence` the raw values; the inspector shows both, and the explainer prompt is seeded from them. `class_confidence` is the class head's probability for the named class; `unknown_reason` explains why the class head declined to name a class (null when a class is named successfully).
 
 ## Design System
 
