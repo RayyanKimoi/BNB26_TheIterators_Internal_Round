@@ -1,0 +1,28 @@
+{
+  "test_seen_top1": 0.95,
+  "test_seen_top3": 1.0,
+  "test_heldout_top1": 0.075,
+  "test_heldout_top3": 0.35,
+  "test_seen_runs": 20,
+  "test_heldout_runs": 40,
+  "baselines": {
+    "last step": {
+      "seen": 0.1,
+      "heldout": 0.075
+    },
+    "first errored step": {
+      "seen": 0.05,
+      "heldout": 0.1
+    },
+    "anomaly heuristic": {
+      "seen": 0.3,
+      "heldout": 0.0
+    },
+    "LLM-as-judge (Gemini)": {
+      "seen": 0.8,
+      "heldout": 0.325
+    }
+  },
+  "loco_mean": 0.2123809523809524,
+  "gate_passed": false
+}

@@ -126,3 +126,160 @@ and deduplicates texts before encoding, which matters because the corpus is
 heavily templated. The goal text comes from `state_snapshot.goal`, falling back
 to `input.goal` and then to the first step's text, so real LangGraph and OTel
 runs that store the task elsewhere still work.
+
+---
+
+# Model
+
+```bash
+python -m model.train                       # train, evaluate, persist
+python -m model.predict --limit 3           # diagnosis contract for sample runs
+python -m pytest model/tests -q
+```
+
+`model/artifacts/localizer.joblib` holds both heads, the `CorpusStats`, the two
+thresholds and the metrics from the run that produced it.
+
+## Two heads
+
+**Localizer.** Per-step binary classification, "is this step the root cause",
+as the Model Specification frames it. Depth-1 stumps, `class_weight="balanced"`
+because root-cause steps are 3.7 percent of rows. This is the head the
+generalization claim is about.
+
+**Class head.** Multiclass over the five trained classes, fit on root-cause
+rows only. It *cannot* name a held-out class, because neither is among its
+labels. That is not a defect, it is why `predicted_class` has an `unknown`
+value: the localizer finds a step whose failure mode it has never seen, and
+the class head declines to name it.
+
+The config was chosen by leave-one-class-out over the trained classes: 21.2
+percent mean for 31 leaves at `min_samples_leaf=5`, against 18.4 at depth 3,
+17.4 at depth 2 and 13.4 for depth-1 stumps.
+
+`min_samples_leaf=5` is the load-bearing setting. `parse_failure` is true on
+only 14 training rows and every one is a root cause, a rule of perfect
+precision. At `min_samples_leaf=30` that leaf was too small to be permitted,
+the split was rejected outright, and the model scored **0 percent** on
+`schema_violation` while ignoring the cleanest signal in the feature set.
+Fixing it took trained-class top-1 from 40 to 95 percent. Rare, highly precise
+indicators are what this problem is made of, and the leaf size has to admit
+them. **`test_heldout` was not used for any tuning decision and must never be.**
+
+## Scores are a distribution over the run's steps
+
+The contract shows `step_scores: [2, 4, 1, 88, 11]` next to `confidence: 0.87`.
+Those sum to about 100 and the confidence is the flagged step's share, so the
+contract already treats scores as a distribution over one run's steps.
+
+Reading it that way fixes a real calibration problem. The raw probability of
+the top step is high in nearly every run, so thresholding it cannot express
+uncertainty. A share can: when four steps tie, each takes about 25 and the run
+correctly reads as `unknown`. Ranking is unaffected, since this is a positive
+per-run rescaling.
+
+## Results
+
+240 runs, seed 7, on the neutralized corpus. `test_seen` is 20 failed runs,
+`test_heldout` is 40. All four baselines.
+
+| Top-1 | Trained | Held out |
+| --- | --- | --- |
+| **Black Box** | **95.0%** | 7.5% |
+| baseline: last step | 10.0% | 7.5% |
+| baseline: first errored step | 5.0% | 10.0% |
+| baseline: anomaly heuristic | 30.0% | 0.0% |
+| baseline: LLM-as-judge (Gemini) | 80.0% | 32.5% |
+
+Top-3: 100.0% trained, 35.0% held out. Leave-one-class-out mean over the
+trained classes: 21.2%.
+
+### The gate fails on held-out classes
+
+The PRD gate is to beat the last-step baseline on held-out classes. The model
+scores 7.5% against the baseline's 7.5%. It does not beat it. **Cross-class
+generalization is not a claim this project can make**, and the Model tab
+should not imply otherwise.
+
+An earlier corpus produced 25% here. That number was an artifact: the
+generator wrote summaries naming each fault in plain English, and
+`semantic_deviation` was embedding the confession. Ablating that single
+feature dropped held-out accuracy to 0.0%, which is what exposed it. The same
+narration let the LLM-as-judge score 95% on held-out by reading rather than
+reasoning; once the prose was neutralized it fell to 32.5%. See
+`generator/README.md`.
+
+### Where the model wins, and why
+
+In distribution it beats the LLM-as-judge 95.0% to 80.0%, and the win is not
+uniform. It concentrates on classes whose signal is a number only meaningful
+against the corpus:
+
+| Class | Model | Judge | Signal |
+| --- | --- | --- | --- |
+| `stale_retrieval` | **100%** | 50% | `duration_z`: a cache hit is abnormally fast |
+| `hallucinated_argument` | **100%** | 50% | token overlap against every upstream output |
+| `schema_violation` | 100% | 100% | `parse_failure` flag |
+| `premature_termination` | 100% | 100% | run length, no terminal tool call |
+| `wrong_tool_chosen` | 75% | **100%** | whether a tool suits the goal |
+| `infinite_loop` | 0% | **60%** | repetition, visible by eye [held out] |
+| `context_truncation` | 15% | 5% | `token_z`: context drop [held out] |
+
+An LLM reading one run sees `213ms` and cannot know that is 0.9 sigma fast for
+that action type across 240 runs. It has no corpus. That is the structural
+advantage, and `stale_retrieval` and `hallucinated_argument` are where it
+shows. The classes the judge wins are the semantic ones, where reading
+comprehension is the right tool. The two approaches are complementary rather
+than redundant.
+
+| Per diagnosis | Black Box | LLM-as-judge |
+| --- | --- | --- |
+| Latency | 11.2 ms | ~1500 ms |
+| Cost | none, runs locally | priced per token, per run |
+| Determinism | same input, same output | not guaranteed |
+
+## Honest limitations
+
+**Cross-class generalization does not work.** 7.5% on held-out, equal to the
+last-step baseline. `infinite_loop` is 0%. The features are class-specific by
+construction: `parse_failure` fires only for `schema_violation`,
+`state_hash_repeat` only for `infinite_loop`. A model trained on five classes
+has no route to the sixth. Top-3 reaches 35%, so the heatmap still puts the
+right region in front of a developer, but top-1 is not there.
+
+**Confidence is not reliable on an unseen class.** On LOCO out-of-fold
+predictions selective accuracy stays flat across every threshold. The
+threshold is therefore chosen in distribution, on `val`, which holds only 10
+failed runs, so it is approximate. `CONFIDENCE_THRESHOLD` in `.env` overrides
+it at load time.
+
+**This localizes a failure, it does not detect one.** At the chosen threshold
+every successful run in the test sets gets a step flagged. Diagnosis is meant
+to run on a trace already known to have failed.
+
+## Unknown rate
+
+| | answered | unknown | class right when named |
+| --- | --- | --- | --- |
+| Trained classes | 90% | 10% | 100% |
+| Held-out classes | 15% | 85% | 0% |
+
+The held-out row is intended behaviour. The class head has five labels and
+neither held-out class is among them, so declining to name a failure mode it
+has never been shown is correct.
+
+## Split
+
+`model/dataset.py`. Four sets, split BY FAILURE CLASS:
+
+| Set | Failed runs | Successful | Used for |
+| --- | --- | --- | --- |
+| `train` | 70% of each trained class | 70% | fitting both heads and `CorpusStats` |
+| `val` | 10% of each trained class | 10% | choosing both thresholds |
+| `test_seen` | 20% of each trained class | 10% | in-distribution accuracy |
+| `test_heldout` | ALL `infinite_loop` + `context_truncation` | 10% | the generalization number |
+
+`_assert_no_leakage` runs on every split and raises if a held-out class
+reaches any training set, if a run lands in two sets, or if `test_heldout` is
+missing either class. A silent leak here would invalidate every number above
+while leaving the training run looking perfectly normal.

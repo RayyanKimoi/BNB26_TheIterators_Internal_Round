@@ -49,6 +49,25 @@ which is what keeps the last-step baseline above zero. If either baseline ever
 reads 0 percent, the corpus has drifted and the comparison is worthless;
 `test_naive_baselines_are_neither_perfect_nor_structurally_zero` guards this.
 
+**Prose reports symptoms, never diagnoses.** A step renders the value it
+actually returned and says nothing about whether that value is correct. This
+is not a style preference. An earlier version wrote summaries like
+`"returned a malformed payload: field delta was not the declared float"` and
+`"Cache hit ... computed for a different query 103 hours ago, not for the
+current query"`. That is the diagnosis printed on the page, and it had two
+measured consequences:
+
+* An LLM-as-judge scored **95%** on held-out classes by reading the answer
+  rather than reasoning. With neutral prose it scores **32.5%**.
+* It leaked into our own `semantic_deviation` feature. Ablating that single
+  column dropped held-out accuracy from 25% to **0.0%**, meaning the entire
+  apparent generalization was the model embedding the confession.
+
+The honest held-out number on the neutral corpus is 7.5%, which does not beat
+the last-step baseline. That is reported rather than hidden.
+`test_summaries_do_not_narrate_the_fault` guards against regression, and a
+phrase list in that test names every construction that has to stay out.
+
 **No step payload carries the label.** No marker field is written anywhere in
 `input`, `output`, or `state_snapshot`. The class is recoverable only from the
 signature. `test_no_injection_marker_leaks_into_step_payloads` guards this.

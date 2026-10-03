@@ -1,0 +1,302 @@
+{
+ "7d48dcec14b8efe36c7add889105014b": {
+  "root_cause_step": 9,
+  "failure_class": "schema_violation",
+  "reason": "The check_feature_entitlement tool returned an unexpected array format instead of the declared schema, which disrupted the flow and prevented correct entitlement confirmation."
+ },
+ "09c3d42a37afc7c812540ca85d24fc0e": {
+  "root_cause_step": 9,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent called escalate_to_engineering instead of send_reply, which violated the plan and goal to send a resolution reply after confirming feature entitlement."
+ },
+ "97959f9700ad193682ed52c37c809b99": {
+  "root_cause_step": 0,
+  "failure_class": "hallucinated_argument",
+  "reason": "The agent hallucinates a sequence of steps including check_seat_availability and book_flight in step 0, when the goal only requires finding and reporting the price of the cheapest refundable flight."
+ },
+ "4b400486673ec49bb68ccf2a8f9719c0": {
+  "root_cause_step": 11,
+  "failure_class": "stale_retrieval",
+  "reason": "Step 11 used a cached result (age=126840s) for a different query, returning seat availability for IB879 instead of the cheapest refundable flight AF613 identified earlier."
+ },
+ "69f61f7b373cb23fb9ee2cc1816e6d29": {
+  "root_cause_step": 6,
+  "failure_class": "hallucinated_argument",
+  "reason": "The model called get_account_status without providing the required account or customer ID argument, causing it to fail, which later cascaded into missing inputs for subsequent steps."
+ },
+ "f405cd0d662a998021d6a88c35a1a4ba": {
+  "root_cause_step": 5,
+  "failure_class": "schema_violation",
+  "reason": "The tool get_fare_rules returned an output breaking its declared schema with flight_no=['unexpected', 'array'], which derailed the subsequent steps."
+ },
+ "b2ac57cadcac55d4d7e56ff3e76dafe6": {
+  "root_cause_step": 8,
+  "failure_class": "hallucinated_argument",
+  "reason": "The agent decided to call check_feature_entitlement without providing the required feature or plan arguments, leading to an input missing error in the subsequent step."
+ },
+ "f2470df0a5e6d6bfa560d00aa820fc01": {
+  "root_cause_step": 6,
+  "failure_class": "premature_termination",
+  "reason": "The agent found the flight in GBP (132.76 GBP) and checked its fare rules, but concluded the run without converting the currency to euros as specified in the goal, leading to premature termination."
+ },
+ "a451ec36f074143d198796893f6f76e8": {
+  "root_cause_step": 7,
+  "failure_class": "premature_termination",
+  "reason": "The agent stopped at step 7 and returned the answer without calling the match_records tool to actually reconcile the invoices against payments and compute the discrepancies."
+ },
+ "cccbf63b75476215830ee044ed0d2aa3": {
+  "root_cause_step": 8,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent attempted to call get_account_status without providing the required input parameter (such as customer ID CUST-2910), causing an error."
+ },
+ "e1d0bee57a0478480001efcc5c9b820d": {
+  "root_cause_step": 6,
+  "failure_class": "stale_retrieval",
+  "reason": "The currency conversion tool served a cached result using GBP instead of the actual USD price found in step 2, corrupting the final price calculation."
+ },
+ "df1118076603cf2ccf1acfbea2a53c0a": {
+  "root_cause_step": 4,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent chose the wrong tool issue_refund instead of checking the customer's plan and entitlements as stated in the goal, deviating from the correct plan."
+ },
+ "197b35a3cc2aa89779ef84c884351267": {
+  "root_cause_step": 7,
+  "failure_class": "schema_violation",
+  "reason": "The convert_currency tool returned output breaking its declared schema with an unexpected array structure, disrupting the price conversion needed to report the total in euros."
+ },
+ "c281d280d8a0994285d0a94e921dbe9b": {
+  "root_cause_step": 8,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent chose to call get_weather, which is irrelevant to the goal of booking a flight and checking prices."
+ },
+ "088182ebd34d0b9207fb6f6de5e669a7": {
+  "root_cause_step": 8,
+  "failure_class": "premature_termination",
+  "reason": "The agent stopped at step 8 without invoking the book_flight tool required to complete the goal of booking the flight, resulting in premature termination."
+ },
+ "533602e8ebcbd833c62774c518391ab2": {
+  "root_cause_step": 6,
+  "failure_class": "hallucinated_argument",
+  "reason": "The convert_currency tool was called with 8431.77 USD, which was not present in any prior step context, leading to a wildly incorrect conversion result that propagated to the booking step."
+ },
+ "2d455327b0d2067960907472287d03e7": {
+  "root_cause_step": 10,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent verified that the customer is entitled to scheduled exports on their plan, but then incorrectly chose to call issue_refund instead of sending the resolution reply as stated in its original plan."
+ },
+ "d84aef71d7e4380ac665d2f42a42db9d": {
+  "root_cause_step": 10,
+  "failure_class": "schema_violation",
+  "reason": "The tool post_reconciliation returned an unparseable malformed number format with spaces '1 449,52 EUR' instead of a standard float, violating the expected schema output."
+ },
+ "87d601480b2c77c067a934d79d212d47": {
+  "root_cause_step": 9,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent checked seat availability for flight QX7741 instead of the cheapest refundable flight it had previously selected and verified, which was FR858."
+ },
+ "1e216b2de6bfdd1ac08f55c9ced9d7dc": {
+  "root_cause_step": 7,
+  "failure_class": "premature_termination",
+  "reason": "The agent stopped after searching the knowledge base without confirming the customer's plan via account status or feature entitlement, and without sending the resolution reply as required by the goal."
+ },
+ "e351e054e62f15f86094235186050bf9": {
+  "root_cause_step": 9,
+  "failure_class": "hallucinated_argument",
+  "reason": "In step 9, the tool check_feature_entitlement was called with customer ID CUST-2100, which was hallucinated and absent from all prior context (the correct customer ID is CUST-2463 obtained in step 2), causing the check to validate the wrong account and leading to premature termination."
+ },
+ "30e559a48c655af9f44be3b2656bf7fd": {
+  "root_cause_step": 10,
+  "failure_class": "infinite_loop",
+  "reason": "The agent entered an unnecessary and repetitive cycle of calling check_seat_availability over and over again instead of proceeding to book the flight, exhausting the step budget."
+ },
+ "6b5c8f697eef89c0c0b3ccee20011ccb": {
+  "root_cause_step": 9,
+  "failure_class": "infinite_loop",
+  "reason": "The agent successfully booked the flight at step 10, but then hallucinated that it needed to book it again and entered an infinite loop of repeatedly booking the same flight until the step budget ran out."
+ },
+ "80491d20d5fc881765ed70cfdba17c8c": {
+  "root_cause_step": 8,
+  "failure_class": "hallucinated_argument",
+  "reason": "At step 8, the agent passed 180.0 GBP to convert_currency, whereas the actual flight price found in step 2 was 129.07 GBP. This hallucinated argument propagated into subsequent steps."
+ },
+ "86e614535d434f36726202cd7b284091": {
+  "root_cause_step": 9,
+  "failure_class": "infinite_loop",
+  "reason": "After successfully booking the flight in step 10, the agent failed to recognize that the goal was achieved and repeatedly called book_flight over and over again until it hit the retry/step budget."
+ },
+ "5219ea4255d335d8c63bbc8c807f6c0a": {
+  "root_cause_step": 3,
+  "failure_class": "infinite_loop",
+  "reason": "The agent repeatedly called lookup_vendor in a loop despite having already successfully resolved the vendor ID in step 4, wasting its step budget on redundant calls until the run failed."
+ },
+ "821419cf2818af80454f49c1b09026a9": {
+  "root_cause_step": 11,
+  "failure_class": "premature_termination",
+  "reason": "The agent finished the run and continued with the figure without outputting the final report stating the total price in euros as required by the goal."
+ },
+ "5232f7c08003c2b82e86ba99ea2a4a71": {
+  "root_cause_step": 11,
+  "failure_class": "infinite_loop",
+  "reason": "The agent successfully matched records at step 10 and posted the reconciliation at step 12, but then entered an infinite loop repeatedly calling post_reconciliation over and over until it hit the step budget."
+ },
+ "4c8c8e879d29afd4f721dfd3755a8c6a": {
+  "root_cause_step": 9,
+  "failure_class": "infinite_loop",
+  "reason": "The agent already successfully called match_records in step 10, but instead of proceeding to report the discrepancy as per the goal, it got stuck repeatedly calling match_records until the step budget was exhausted."
+ },
+ "1e73cb242e51469d5b8b95da3b4a171c": {
+  "root_cause_step": 16,
+  "failure_class": "premature_termination",
+  "reason": "The agent stopped after posting the reconciliation instead of reporting the discrepancy over fifty euros as required by the goal."
+ },
+ "9ffd3220b55a156491b9863812393c8b": {
+  "root_cause_step": 0,
+  "failure_class": "premature_termination",
+  "reason": "The initial plan generated in step 0 stated the sequence of tools to call, but it omitted fetching the specific invoice line items or detailed transaction IDs required by post_reconciliation, causing the final posting to fail with missing required inputs."
+ },
+ "986e69069b850285273e5dc0b84ee787": {
+  "root_cause_step": 9,
+  "failure_class": "infinite_loop",
+  "reason": "The agent repeatedly calls check_seat_availability unnecessarily and gets stuck in an endless loop trying the same action, which eventually exhausts its retry/step budget and prevents completion."
+ },
+ "2d052a7d02fdfc3472d479d68dc29335": {
+  "root_cause_step": 8,
+  "failure_class": "infinite_loop",
+  "reason": "The agent repeatedly calls match_records over and over from step 8 onwards without proceeding to post_reconciliation or reporting the result, causing an infinite loop until the budget runs out."
+ },
+ "4e62cf5c70cb55bada6e59698e0b7294": {
+  "root_cause_step": 7,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent called fetch_payments without providing the required parameters (such as vendor ID VEND-368 or date range), causing the tool to fail with missing input."
+ },
+ "f927466a8661ff6c9936d634200bee3e": {
+  "root_cause_step": 9,
+  "failure_class": "hallucinated_argument",
+  "reason": "Step 9 decided to call check_feature_entitlement without checking or providing the required parameters needed by that tool, leading to a missing input error in step 10."
+ },
+ "b9a70acb382a84dc9c4901e3cf8d0503": {
+  "root_cause_step": 3,
+  "failure_class": "infinite_loop",
+  "reason": "The agent entered a repetitive cycle of calling the search_kb tool over and over again for the same information instead of proceeding to check the account status and feature entitlements as originally planned, leading to exhaustion of the step budget."
+ },
+ "2b35d243f7cec5dfcaed4745cd4e618c": {
+  "root_cause_step": 1,
+  "failure_class": "hallucinated_argument",
+  "reason": "The agent extracted ticket ID 4821 and customer CUST-2868 from the ticket details, but subsequent tool calls for get_account_status and check_feature_entitlement failed due to missing required inputs (like the customer ID) because the plan and initial tool usage did not correctly map arguments from prior step outputs."
+ },
+ "2aa0773518e259773f84c9839bb7ec58": {
+  "root_cause_step": 7,
+  "failure_class": "infinite_loop",
+  "reason": "The agent already successfully fetched the payments for the vendor at step 6, but instead of proceeding to match the records, it repeatedly called fetch_payments over and over until the step budget was exhausted."
+ },
+ "70f3df7b4bd81ed1401ce1d07dfff89e": {
+  "root_cause_step": 11,
+  "failure_class": "infinite_loop",
+  "reason": "After successfully obtaining the reconciliation result showing a delta of -5568.3 EUR in step 10, the agent redundantly calls match_records again in step 11 and gets stuck repeating the same tool call until the retry budget is exhausted."
+ },
+ "b7c5faa4b6a9cb1a92f852974e81570f": {
+  "root_cause_step": 9,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent called match_records instead of performing an explicit calculation or fetching further details when invoices totaled 13798.73 EUR and payments totaled only 3599.35 EUR, leading to an incorrect tool execution and subsequent failure at post_reconciliation."
+ },
+ "094a62891d5b0cfadfc4ed9db82c76e3": {
+  "root_cause_step": 7,
+  "failure_class": "hallucinated_argument",
+  "reason": "The convert_currency tool was called with 180.0 GBP, which was absent from all prior context (the flight price was 267.08 GBP)."
+ },
+ "744b1a9a27e6009aabb159f2a812dcf6": {
+  "root_cause_step": 9,
+  "failure_class": "infinite_loop",
+  "reason": "After successfully obtaining the reconciliation delta at step 10, the agent repeatedly calls match_records instead of calling post_reconciliation or reporting the discrepancy as required by the goal, leading to an infinite retry/call loop."
+ },
+ "10118b54c5ef2957cca8e58fc6465320": {
+  "root_cause_step": 6,
+  "failure_class": "infinite_loop",
+  "reason": "After successfully fetching the ticket and searching the knowledge base once in step 5, the agent repeatedly calls search_kb over and over again for the same information instead of proceeding to check account status and sending the resolution reply, leading to an infinite loop until it hits retry limits."
+ },
+ "aa0aa54ee18ac672ac4a7cf10790c6eb": {
+  "root_cause_step": 9,
+  "failure_class": "infinite_loop",
+  "reason": "After successfully fetching payments at step 8, the agent redundantly calls fetch_payments again in an infinite loop instead of proceeding to match records or report the discrepancy."
+ },
+ "6888166d09d3fb120aeba9a739f3874b": {
+  "root_cause_step": 6,
+  "failure_class": "hallucinated_argument",
+  "reason": "The agent called get_account_status at step 6 without providing the required customer ID parameter (CUST-2011), which was present in step 2 but omitted in the tool call argument, causing the subsequent validation errors."
+ },
+ "ead8719a88547ea373a8f6392b29966e": {
+  "root_cause_step": 6,
+  "failure_class": "infinite_loop",
+  "reason": "The agent repeatedly called lookup_vendor for the exact same entity over and over until it exhausted its retry limit and step budget, without making progress toward fetching payments or matching records."
+ },
+ "5b76c9c65cf20755a24594edd39b909a": {
+  "root_cause_step": 7,
+  "failure_class": "infinite_loop",
+  "reason": "The agent repeatedly called fetch_payments over and over again from step 7 onward instead of progressing to match_records and post_reconciliation, causing an infinite loop until the budget was exhausted."
+ },
+ "1ad8dc82d4537d0765ee082dbe54cba4": {
+  "root_cause_step": 8,
+  "failure_class": "hallucinated_argument",
+  "reason": "Step 8 incorrectly confirms feature entitlement based on unchecked assumptions or fabricated logic since the starter plan typically does not include scheduled exports, leading to a false premise in the final reply."
+ },
+ "af8c6678e1b0c921f960c5e94d13d262": {
+  "root_cause_step": 8,
+  "failure_class": "hallucinated_argument",
+  "reason": "At step 8, the agent passed customer ID CUST-2100 to check_feature_entitlement instead of the actual customer ID CUST-2759 found in ticket 4821, leading to an incorrect entitlement check for the wrong customer."
+ },
+ "d0a37e3761266c3e3b9cacf3afb24a34": {
+  "root_cause_step": 9,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent called match_records without supplying the necessary parameters from prior tool outputs, leading to a missing input error."
+ },
+ "0b3b84b34367e1a42db31ce35bf9afe0": {
+  "root_cause_step": 5,
+  "failure_class": "infinite_loop",
+  "reason": "The agent repeatedly called lookup_vendor over and over for the same vendor without progressing to fetching payments or matching records, resulting in step budget exhaustion."
+ },
+ "d768c7d66d60ed0ae342c090867444ad": {
+  "root_cause_step": 8,
+  "failure_class": "infinite_loop",
+  "reason": "Step 8 initiated an unnecessary repeated call to match_records after the reconciliation was already successfully performed in step 9, triggering a retry loop that ultimately exhausted the step budget without reporting the discrepancy."
+ },
+ "cffa3a1b0026bc8358782b851ca5c6a1": {
+  "root_cause_step": 8,
+  "failure_class": "hallucinated_argument",
+  "reason": "Step 8 checked feature entitlement for scheduled_exports on the starter plan based on an incorrect assumption, but checking KB-106 earlier likely would have shown scheduled exports are not available on the starter plan. Alternatively, check_feature_entitlement output that starter plan includes scheduled_exports contradicts standard tiered feature sets, but looking closely at the tool output, it confirmed entitlement. However, checking knowledge base or account status reveals a contradiction where starter plans do not support this feature, meaning step 8 or the tool output hallucinated the entitlement status."
+ },
+ "ee7128ed61b917101b75c183f04a4846": {
+  "root_cause_step": 14,
+  "failure_class": "premature_termination",
+  "reason": "The agent successfully booked the flight and obtained all necessary information by step 12, but failed to output the final answer reporting the total price in euros to the user, leading to a premature termination when the run budget ran out."
+ },
+ "fe81184d6d27cbcbc4ccfeee40f5d699": {
+  "root_cause_step": 10,
+  "failure_class": "hallucinated_argument",
+  "reason": "In step 10, the match_records tool was called with incorrect parameters or logic that completely ignored the 13613.73 EUR invoice total, resulting in a false delta equal to the entire payment amount (-12377.89 EUR)."
+ },
+ "01d11e96f67c49402792f68acf7bbd21": {
+  "root_cause_step": 12,
+  "failure_class": "wrong_tool_chosen",
+  "reason": "The agent attempted to invoke send_reply without gathering or providing the required parameters (such as the ticket ID or reply content), indicating that the decide step chose to execute the tool prematurely or incorrectly."
+ },
+ "09b7f32b498c50aed17cb3fa90422aea": {
+  "root_cause_step": 9,
+  "failure_class": "hallucinated_argument",
+  "reason": "The agent checked feature entitlement for customer ID CUST-2100 instead of the correct customer ID CUST-2280 retrieved from ticket 4821 in step 2. This hallucinated argument propagated into subsequent actions, leading to an incorrect triage and resolution."
+ },
+ "03f60e04ace0b39d188c1a101c0d6f4d": {
+  "root_cause_step": 9,
+  "failure_class": "infinite_loop",
+  "reason": "The agent entered an unnecessary and repetitive loop checking seat availability repeatedly after having already successfully checked it, exhausting its budget without booking the flight."
+ },
+ "3a578624221ce8c0a4a7f104662a258b": {
+  "root_cause_step": 7,
+  "failure_class": "infinite_loop",
+  "reason": "The agent repeatedly called the get_account_status tool over and over again from step 7 through step 18 without making progress toward checking feature entitlement or sending the reply, exhausting its step budget and failing the goal."
+ },
+ "8f3e0fcf6059e07de73a3c764154e55b": {
+  "root_cause_step": 6,
+  "failure_class": "hallucinated_argument",
+  "reason": "In step 6, the agent called get_account_status for account CUST-2100, but ticket 4821 fetched in step 2 explicitly stated the customer ID was CUST-2354. This hallucinated customer ID caused subsequent steps to check the wrong account."
+ }
+}

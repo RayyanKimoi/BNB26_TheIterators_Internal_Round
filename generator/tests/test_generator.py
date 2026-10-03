@@ -221,3 +221,57 @@ def test_naive_baselines_are_neither_perfect_nor_structurally_zero():
 
     assert 0.01 < last < 0.5, f"last-step baseline at {last:.0%} looks rigged"
     assert 0.01 < first_err < 0.5, f"first-error baseline at {first_err:.0%} looks rigged"
+
+
+# -- the corpus must not narrate its own faults ---------------------------
+
+# Phrases that state a diagnosis rather than report an observation. An earlier
+# version of the generator wrote these, which let an LLM-as-judge score 95
+# percent by reading the answer off the page and leaked the label into the
+# semantic_deviation feature. See generator/README.md.
+DIAGNOSTIC_PHRASES = (
+    "does not appear in any earlier",
+    "malformed",
+    "not for the current query",
+    "cache hit",
+    "i no longer have",
+    "the same payload as the previous",
+    "state is unchanged",
+    "state has not advanced",
+    "look sufficient",
+    "may provide what the goal needs",
+    "does not contain the field",
+    "assumed value",
+    "cause:",
+    "was not available from earlier steps",
+    "re-checked",
+    "will be retried",
+    "returned what the next step needs",
+)
+
+
+@pytest.mark.parametrize("fault", FAILURE_CLASSES)
+def test_summaries_do_not_narrate_the_fault(fault):
+    """Prose reports what a step returned, never whether it was wrong."""
+    for trace, _ in runs_of(fault, n=9):
+        for step in trace.steps:
+            text = json.dumps(step.to_dict()).lower()
+            for phrase in DIAGNOSTIC_PHRASES:
+                assert phrase not in text, (
+                    f"{fault}: step[{step.step_index}] narrates the diagnosis "
+                    f"with {phrase!r}"
+                )
+
+
+def test_root_cause_step_is_not_textually_distinctive():
+    """The root-cause summary must not stand out from its own run by wording.
+
+    A cheap proxy for the leak that mattered: if the root-cause step is the
+    only step mentioning a diagnostic word, any reader finds it for free.
+    """
+    for fault in FAILURE_CLASSES:
+        for trace, _ in runs_of(fault, n=6):
+            root = trace.steps[trace.run.true_failure_step]
+            text = str(root.output.get("summary", "")).lower()
+            for phrase in DIAGNOSTIC_PHRASES:
+                assert phrase not in text

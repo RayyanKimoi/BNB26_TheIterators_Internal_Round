@@ -42,7 +42,7 @@ def _starved_result(tool_name: str, rng: random.Random) -> dict[str, Any]:
     return {
         "error": "precondition_not_met",
         "detail": f"{tool_name} could not resolve the required {missing} from prior context.",
-        "summary": f"{tool_name} failed: the required {missing} was not available from earlier steps.",
+        "summary": f"{tool_name} failed: required input missing.",
     }
 
 
@@ -91,7 +91,7 @@ def build_run(
             truth_step = b.decide(
                 "finish",
                 confident_distribution(rng, "finish", rivals),
-                "The results so far look sufficient. Returning the answer.",
+                "Returning the answer.",
             )
             evidence_path = f"step[{truth_step}].output.chosen_tool"
             b.call_llm(
@@ -115,7 +115,7 @@ def build_run(
                 idx = b.decide(
                     tool_name,
                     dist,
-                    f"Attempt {i + 1}: calling {tool_name} again, the state has not advanced.",
+                    f"Calling {tool_name} to make progress toward the goal.",
                     frozen_state=frozen,
                 )
                 if i == 0:
@@ -123,10 +123,6 @@ def build_run(
                     evidence_path = f"step[{idx}].state_snapshot"
                 args = spec.args_fn(b.facts, rng)
                 result = spec.result_fn(args, b.facts, rng)
-                result["summary"] = (
-                    f"{tool_name} returned the same payload as the previous attempt. "
-                    f"Agent state is unchanged after {i + 1} attempts."
-                )
                 b.call_tool(
                     spec,
                     args,
@@ -151,7 +147,7 @@ def build_run(
 
         if is_fault and fault == "wrong_tool_chosen":
             chosen = rng.choice(list(task.distractors))
-            rationale = f"{chosen} may provide what the goal needs here."
+            rationale = f"Calling {chosen} to make progress toward the goal."
             uncertain = True
 
         rivals = _rival_tools(task, chosen, rng)
@@ -166,14 +162,11 @@ def build_run(
         if is_anomaly and anomaly == "benign_revisit":
             revisit_args = spec.args_fn(b.facts, rng)
             revisit_result = spec.result_fn(revisit_args, b.facts, rng)
-            revisit_result["summary"] = (
-                f"Re-checked {tool_name} to confirm the earlier value before continuing."
-            )
             b.call_tool(spec, revisit_args, revisit_result, commit=False)
             b.decide(
                 tool_name,
                 confident_distribution(rng, tool_name, _rival_tools(task, tool_name, rng)),
-                f"Value confirmed. Proceeding with {tool_name}.",
+                f"Calling {tool_name} to make progress toward the goal.",
             )
 
         # -- the tool call -------------------------------------------------
@@ -193,12 +186,8 @@ def build_run(
             kwargs["commit"] = False
 
         if is_fault and fault == "hallucinated_argument":
-            args, field, value = faults.hallucinate_arg(args, rng)
+            args, field, _value = faults.hallucinate_arg(args, rng)
             result = call_spec.result_fn(args, b.facts, rng)
-            result["summary"] = (
-                f"{chosen} returned a record for {field}={value}, which does not "
-                f"appear in any earlier step output."
-            )
             truth_step = b.next_index
             evidence_path = f"step[{truth_step}].input.{field}"
             degraded = True
@@ -222,7 +211,6 @@ def build_run(
 
         if immediate_error:
             kwargs["error_flag"] = True
-            result["summary"] = f"{result.get('summary', '')} The caller rejected this result."
 
         if is_anomaly and anomaly == "slow_tool":
             kwargs["duration_scale"] = rng.uniform(4.0, 6.5)
@@ -236,7 +224,7 @@ def build_run(
                 {
                     "error": "upstream_timeout",
                     "detail": f"{chosen} timed out, retrying.",
-                    "summary": f"{chosen} timed out on the first attempt and will be retried.",
+                    "summary": f"{chosen} timed out.",
                 },
                 retry_count=1,
                 error_flag=True,
@@ -284,7 +272,7 @@ def build_run(
             )
         elif rng.random() < REFLECT_PROBABILITY:
             b.call_llm(
-                f"{chosen} returned what the next step needs. Continuing.",
+                f"Checking the {chosen} result against the goal.",
                 prompt="Check the last result against the goal.",
             )
 

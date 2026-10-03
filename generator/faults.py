@@ -64,10 +64,9 @@ def break_schema(
     else:
         out[field] = ["unexpected", "array"]
 
-    out["summary"] = (
-        f"Tool {spec.name} returned a malformed payload: field {field} was not "
-        f"the declared {declared}."
-    )
+    # The corrupted value speaks for itself in the payload, and `parse_failure`
+    # is the observable telemetry. The prose does not call it malformed.
+    out["summary"] = f"{spec.name} returned {field}={out[field]!r}."
     return out, field
 
 
@@ -103,11 +102,9 @@ def stale_payload(
     result = spec.result_fn(stale_args, state, rng)
     age_s = rng.randint(38_000, 410_000)
     result["quoted_at"] = f"2025-1{rng.randint(0, 2)}-{rng.randint(10, 28):02d}T0{rng.randint(1, 9)}:12:00Z"
-    changed = {k: v for k, v in stale_args.items() if args.get(k) != v}
-    result["summary"] = (
-        f"Cache hit. {result.get('summary', '')} This result was computed for "
-        f"{changed} roughly {age_s // 3600} hours ago, not for the current query."
-    )
+    # The summary describes the cached payload exactly as the tool would report
+    # it. That it answers a different query than the one asked is visible only
+    # by comparing it against the run, and from `cache_age_s` in the telemetry.
     return result, stale_args, age_s
 
 
@@ -153,28 +150,18 @@ def truncated_reflection(rng: random.Random, dropped: int) -> str:
 
     Signature: token count drop, reference to absent content.
     """
-    return (
-        "Continuing from the earlier result. I no longer have the specific "
-        "values from the previous steps in context, so I will proceed with the "
-        "figure referenced above."
-    )
+    # A short continuation. The signal is the token count, not the wording.
+    return "Continuing with the figure from the previous step."
 
 
 def off_goal_reflection(tool_name: str) -> str:
-    return (
-        f"The {tool_name} result does not contain the field the next step needs. "
-        f"Proceeding with an assumed value."
-    )
+    return f"Checking the {tool_name} result against the goal."
 
 
 def failure_summary(class_name: str, task_goal: str) -> str:
-    reasons = {
-        "wrong_tool_chosen": "the wrong tool was queried, so the required fact was never retrieved",
-        "hallucinated_argument": "an identifier that never appeared upstream was passed to a tool",
-        "stale_retrieval": "a cached result from a different query was used as if it were current",
-        "premature_termination": "the run stopped before the goal condition was met",
-        "infinite_loop": "the agent re-entered the same state until the step budget was exhausted",
-        "schema_violation": "a tool returned a payload that did not match its declared schema",
-        "context_truncation": "earlier messages left the prompt window and the needed values were lost",
-    }
-    return f"Run did not complete the goal. Cause: {reasons[class_name]}."
+    """The closing step of a failed run.
+
+    It states that the goal was not met and stops there. Naming the cause here
+    would put the label in the last step of every failed trace.
+    """
+    return "Run did not complete the goal."
