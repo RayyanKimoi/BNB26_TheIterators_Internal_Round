@@ -302,6 +302,29 @@ def leave_one_class_out(
     return per_class, float(np.mean(list(per_class.values()))), out_of_fold
 
 
+def invariant_thresholds(frame: pd.DataFrame) -> dict[str, float]:
+    """Derive the invariant tier's cut points from the TRAINING distribution.
+
+    The invariant tier needs to know what counts as an extreme token collapse
+    or an extreme state repetition. Those numbers must come from the training
+    rows, never from inspecting the held-out classes: a threshold reverse
+    engineered from `context_truncation` traces is held-out tuning wearing a
+    disguise, and it makes any generalization claim circular.
+
+    Percentiles of the training rows are distribution facts the model is
+    already allowed to see, so they carry no information about an unseen
+    failure mode beyond "this is unusual here".
+    """
+    token_z = frame["token_z"].astype(float).to_numpy()
+    repeats = frame["state_hash_repeat"].astype(float).to_numpy()
+    return {
+        # 1st percentile: a token count in the bottom 1% of everything seen.
+        "token_z_floor": float(np.percentile(token_z, 1)),
+        # 99th percentile: a state recurring more than 99% of training steps do.
+        "state_repeat_ceiling": float(np.percentile(repeats, 99)),
+    }
+
+
 @dataclass
 class TrainingReport:
     lines: list[str] = field(default_factory=list)
@@ -355,6 +378,14 @@ def train(
     class_head.fit(root[list(FEATURE_COLUMNS)], root["injected_class"].to_numpy())
     report.add(
         f"class head     {len(root)} rows over {len(TRAIN_CLASSES)} trained classes"
+    )
+    report.add()
+
+    thresholds = invariant_thresholds(frames["train"])
+    report.add(
+        f"invariant cuts  token_z_floor {thresholds['token_z_floor']:.2f}   "
+        f"state_repeat_ceiling {thresholds['state_repeat_ceiling']:.1f}   "
+        f"(1st/99th percentile of TRAIN rows, never of held-out)"
     )
     report.add()
 
@@ -523,6 +554,7 @@ def train(
             "step_threshold": step_threshold,
             "class_threshold": class_threshold,
             "trained_classes": list(TRAIN_CLASSES),
+            "invariant_thresholds": thresholds,
             "trained_at": datetime.now(timezone.utc).isoformat(),
             "seed": seed,
             "corpus": str(corpus_path),

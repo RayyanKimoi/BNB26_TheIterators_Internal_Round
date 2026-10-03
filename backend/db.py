@@ -40,9 +40,17 @@ class AgentRun(SQLModel, table=True):
     source: str = Field(default="synthetic")  # synthetic / langgraph / otel
     task_type: str = Field(default="")
     status: str = Field(default="failed")  # success / failed
-    parent_run_id: Optional[str] = Field(default=None)
+    # Fork lineage. parent_run_id is a real self-referential FK so a fork can
+    # never point at a run that does not exist.
+    parent_run_id: Optional[str] = Field(default=None, foreign_key="agent_runs.id")
+    # PRD Data Model calls this `forked_at_step`. Phase 4 spec called it
+    # `fork_step_index`; the PRD name is kept because the frozen schema, the
+    # generator `Run` dataclass and the existing API models all use it.
     forked_at_step: Optional[int] = Field(default=None)
     fix_applied: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    # Structured Gemini root-cause analysis, written by POST /runs/{id}/explain.
+    # JSON (JSONB on Postgres) holding root_cause, evidence_summary, proposed_fix.
+    explanation: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     injected_class: Optional[str] = Field(default=None)
     true_failure_step: Optional[int] = Field(default=None)
     total_tokens: int = Field(default=0)
@@ -101,6 +109,10 @@ class Diagnosis(SQLModel, table=True):
     shap: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     class_confidence: float = Field(default=0.0)
     unknown_reason: Optional[str] = Field(default=None, sa_column=Column(Text))
+    # Set when the invariant tier flagged the step instead of the classifier.
+    # Was being passed to this row without a column to land in, so it was
+    # silently dropped on every write.
+    anomaly_signal: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=_now)
 
     # Relationships

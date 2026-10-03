@@ -100,7 +100,8 @@ class DiagnosisResponse(BaseModel):
         0.0,
         description=(
             "The class head's probability for the named class. "
-            "0.0 when predicted_class is 'unknown' or when the invariant tier named it."
+            "0.0 whenever predicted_class is 'unknown', including when the "
+            "invariant tier flagged the step (that tier never names a class)."
         ),
     )
     unknown_reason: str | None = Field(
@@ -108,6 +109,17 @@ class DiagnosisResponse(BaseModel):
         description=(
             "Why the system declined to name a class. Null when a class is "
             "named successfully. Shows in the inspector panel."
+        ),
+    )
+    anomaly_signal: str | None = Field(
+        None,
+        description=(
+            "Set when the step was flagged by the distribution-relative "
+            "invariant tier rather than the classifier: 'token_collapse' or "
+            "'state_repetition'. These name an OBSERVATION, never a failure "
+            "class. Whenever this is set, predicted_class is 'unknown', "
+            "because the tier localizes a step without claiming to recognize "
+            "a failure mode the model was never trained on."
         ),
     )
 
@@ -131,6 +143,7 @@ class RunSummary(BaseModel):
     parent_run_id: str | None = None
     forked_at_step: int | None = None
     has_diagnosis: bool = False
+    total_steps: int = 0
 
 
 class StepDetail(BaseModel):
@@ -187,3 +200,80 @@ class EvaluationResponse(BaseModel):
     hybrid_heldout_top1: float | None = None
     hybrid_per_class: dict[str, float] | None = None
     hybrid_gate_passed: bool | None = None
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: explain and fork
+# ---------------------------------------------------------------------------
+
+
+class ExplainRequest(BaseModel):
+    """Body for POST /runs/{id}/explain."""
+
+    step_index: int = Field(
+        ..., ge=0, description="Index of the step to explain, usually the flagged step"
+    )
+
+
+class ExplanationPayload(BaseModel):
+    """The Gemini explainer's enforced output shape.
+
+    Stored verbatim in `agent_runs.explanation` (JSONB) and returned by the
+    endpoint. The LLM never chooses the step; it explains the one the model
+    flagged.
+    """
+
+    root_cause: str = Field(..., description="Why this step is the origin of the failure")
+    evidence_summary: list[str] = Field(
+        default_factory=list,
+        description="Key JSON attributes and values that triggered the failure",
+    )
+    proposed_fix: str = Field(
+        "", description="Code diff or modified JSON payload that resolves the issue"
+    )
+
+
+class ExplanationResponse(ExplanationPayload):
+    """Explanation plus the context needed to render it in the inspector."""
+
+    run_id: str
+    step_index: int
+    predicted_class: str = Field(
+        "unknown", description="Class the model assigned to the flagged step"
+    )
+    shap: dict[str, float] | None = Field(
+        None, description="SHAP attributions that seeded the explanation"
+    )
+    cached: bool = Field(
+        False, description="True when returned from agent_runs.explanation without a new LLM call"
+    )
+
+
+class ForkRequest(BaseModel):
+    """Body for POST /runs/{id}/fork."""
+
+    from_step: int = Field(..., ge=0, description="Step index to diverge at")
+    fix_payload: dict[str, Any] | None = Field(
+        None, description="Patch merged into the forked step's output"
+    )
+    override_code: str | None = Field(
+        None, description="Free-form override recorded on the fork for audit"
+    )
+
+
+class ForkResponse(BaseModel):
+    """Result of a fork: the child run, its replayed steps, and the outcome."""
+
+    child_run_id: str
+    parent_run_id: str
+    status: str = Field(..., description="'completed' once the suffix has been replayed")
+    outcome: str = Field(..., description="'success' or 'failed' after re-diagnosis")
+    parent_outcome: str = Field(..., description="The original run's status, for comparison")
+    forked_at_step: int
+    steps_replayed: int = Field(..., description="How many suffix steps were re-executed")
+    steps_total: int
+    fix_applied: dict[str, Any] | None = None
+    steps: list[StepDetail] = Field(default_factory=list)
+    diagnosis: DiagnosisResponse | None = Field(
+        None, description="Fresh diagnosis of the child run"
+    )

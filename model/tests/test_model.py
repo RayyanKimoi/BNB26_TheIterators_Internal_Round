@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -267,3 +268,72 @@ def test_evidence_quotes_raw_feature_values(trained, corpus):
     # NaN is reported as null, never as a filler number.
     for value in d["evidence"].values():
         assert value is None or isinstance(value, (int, float, bool))
+
+
+# -- the invariant tier must localize without ever naming a class ---------
+
+
+def test_invariant_tier_never_names_a_held_out_class(trained, corpus):
+    """The regression guard for the leak this tier originally shipped with.
+
+    An earlier version returned "context_truncation" and "infinite_loop" from
+    hardcoded cut points, which made the generalization claim circular. The
+    tier may flag a step; it may not name a class it was never trained on.
+    """
+    artifact, _ = trained
+    model = Localizer.load(artifact, embedder=StubEmbedder())
+    for run in corpus:
+        d = model.diagnose(run)
+        if d.get("anomaly_signal") is not None:
+            assert d["predicted_class"] == "unknown"
+            assert d["unknown_reason"]
+        assert d["predicted_class"] not in HELD_OUT_CLASSES
+
+
+def test_invariant_signals_name_observations_not_diagnoses(trained, corpus):
+    artifact, _ = trained
+    model = Localizer.load(artifact, embedder=StubEmbedder())
+    allowed = {None, "token_collapse", "state_repetition"}
+    for run in corpus:
+        assert model.diagnose(run).get("anomaly_signal") in allowed
+
+
+def test_invariant_thresholds_come_from_training_not_the_source(trained):
+    """Cut points must be data, carried in the artifact, not literals in code."""
+    import joblib
+
+    artifact, _ = trained
+    thresholds = joblib.load(artifact)["invariant_thresholds"]
+    assert set(thresholds) == {"token_z_floor", "state_repeat_ceiling"}
+    assert thresholds["token_z_floor"] < 0
+    assert thresholds["state_repeat_ceiling"] >= 0
+    source = (Path(__file__).parent.parent / "predict.py").read_text(encoding="utf-8")
+    for literal in ("-1.8", "_TOKEN_Z_THRESHOLD", "_HASH_REPEAT_THRESHOLD"):
+        assert literal not in source, f"{literal!r} is a hardcoded cut point"
+
+
+def test_tier_is_disabled_when_the_artifact_has_no_thresholds(trained, corpus):
+    """An older artifact must degrade to the supervised tier, not guess."""
+    artifact, _ = trained
+    model = Localizer.load(artifact, embedder=StubEmbedder())
+    model.invariant_thresholds = {}
+    for run in corpus[:6]:
+        assert model.diagnose(run).get("anomaly_signal") is None
+
+
+def test_invariant_thresholds_are_percentiles_of_the_training_rows(corpus):
+    from model.dataset import split_by_failure_class
+    from model.features import CorpusStats, FeatureExtractor
+    from model.train import invariant_thresholds
+
+    split = split_by_failure_class(corpus, seed=7)
+    frame = FeatureExtractor(CorpusStats.fit(split.train), StubEmbedder()).transform_many(
+        split.train
+    )
+    thresholds = invariant_thresholds(frame)
+    assert thresholds["token_z_floor"] == pytest.approx(
+        np.percentile(frame["token_z"].astype(float), 1)
+    )
+    assert thresholds["state_repeat_ceiling"] == pytest.approx(
+        np.percentile(frame["state_hash_repeat"].astype(float), 99)
+    )

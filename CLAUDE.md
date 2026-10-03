@@ -22,20 +22,26 @@ Full spec is in PRD.md. Read the relevant section before building. This file is 
 - `.venv/` Python 3.13. Deps in `requirements.txt`, env template in `.env.example`
 
 ## Diagnosis contract — every consumer reads this exact shape
+Source of truth is `backend/models.py::DiagnosisResponse`. Mirror it, never fork it.
 {
   "run_id": "uuid",
   "flagged_step_index": 14,
-  "confidence": 0.87,
-  "predicted_class": "stale_retrieval",
-  "evidence_path": "step[14].output.currency",
+  "confidence": 0.87,                  // flagged step's share of step_scores, 0-1
+  "predicted_class": "stale_retrieval", // one of the 7 classes, or "unknown"
+  "evidence_path": "step[14].output.currency",  // P1, null for now
   "evidence": {"semantic_deviation": 0.71, "duration_z": 2.4, "arg_novelty": 0.0},
-  "shap": {"semantic_deviation": 0.31, "retrieval_similarity": 0.24, "duration_z": 0.12},
-  "step_scores": [2, 4, 1, 88, 11],
-  "explanation": "...",
-  "suggested_fixes": [{"rank": 1, "patch": {}, "rationale": "..."}],
-  "class_confidence": 0.92,
-  "unknown_reason": null
+  "shap": {"semantic_deviation": 0.31, "arg_novelty": 0.24, "duration_z": 0.12},  // P1, null for now
+  "step_scores": [2, 4, 1, 88, 11],    // one per step, 0-100, sums to ~100
+  "explanation": "...",                // P1 Gemini, null for now
+  "suggested_fixes": [{"rank": 1, "patch": {}, "rationale": "..."}],  // P1 Gemini
+  "class_confidence": 0.92,            // class head probability, 0.0 when unknown
+  "unknown_reason": null,              // why no class was named, null when named
+  "anomaly_signal": null               // "token_collapse" | "state_repetition" | null
 }
+`shap` and `evidence` keys are always real feature names from the ten columns.
+`anomaly_signal` set means the distribution-relative invariant tier flagged the
+step, not the classifier. It names an observation, never a class, so whenever it
+is set `predicted_class` is "unknown".
 
 ## Design tokens
 bg #0A0A0B · panel #111113 · border #1F1F23 · text #E8E8E8 · muted #8A8A92 · accent #7DF9C4 · warn #E8B14C · critical #E0574C · pass #5BC98C

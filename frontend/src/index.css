@@ -1,0 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+/*
+ * Design tokens from CLAUDE.md and the PRD Design System section. These are
+ * the project's hard rules, not suggestions: minimal, dark, terminal
+ * adjacent, with hairline borders doing the structural work and the accent
+ * reserved for interactive affordances.
+ *
+ * Tailwind 4 derives utilities from these, so `--color-panel` gives
+ * `bg-panel`, `text-panel`, `border-panel` and so on. Add a colour here
+ * rather than inlining a hex anywhere in a component.
+ */
+@theme {
+  --color-bg: #0a0a0b;
+  --color-panel: #111113;
+  --color-border: #1f1f23;
+  --color-text: #e8e8e8;
+  --color-muted: #8a8a92;
+  --color-accent: #7df9c4;
+  --color-warn: #e8b14c;
+  --color-critical: #e0574c;
+  --color-pass: #5bc98c;
+
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius-panel: 4px;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    background-color: var(--color-bg);
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  /* Geist Mono for all data: step ids, JSON, field paths, timestamps. */
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
+  }
+
+  :focus-visible {
+    outline: 1px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-accent) 28%, transparent);
+    color: var(--color-text);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border: 2px solid var(--color-bg);
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2b2b31;
+  }
+}
+
+@layer components {
+  /*
+   * Dot-matrix texture. Carries the terminal character without touching
+   * legibility, so it sits behind panels at very low opacity, never behind
+   * body text.
+   */
+  .dot-matrix {
+    background-image: radial-gradient(var(--color-border) 1px, transparent 1px);
+    background-size: 4px 4px;
+  }
+
+  /* Hairline rule. The border is the main source of terminal feel. */
+  .hairline {
+    border: 1px solid var(--color-border);
+  }
+
+  /* Data cell: anything numeric, identifying, or machine generated. */
+  .data {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: -0.01em;
+  }
+}
+
+/*
+ * Honour prefers-reduced-motion everywhere. Required by CLAUDE.md, and far
+ * cheaper to establish now than to retrofit across every animated component.
+ * Framer Motion reads the same media query via useReducedMotion().
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -12,12 +12,13 @@ the LLM layer has run yet.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
+import pandas as pd
 
 from model.features import FEATURE_COLUMNS, CorpusStats, Embedder, FeatureExtractor
 
@@ -48,6 +49,9 @@ class Localizer:
     trained_classes: list[str]
     metadata: dict[str, Any]
     embedder: Embedder
+    # Cut points for the invariant tier, derived from the TRAINING rows
+    # only. Empty means the tier is disabled rather than guessing.
+    invariant_thresholds: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def load(
@@ -67,6 +71,7 @@ class Localizer:
             step_threshold=float(override) if override else float(artifact["step_threshold"]),
             class_threshold=float(artifact["class_threshold"]),
             trained_classes=list(artifact["trained_classes"]),
+            invariant_thresholds=dict(artifact.get("invariant_thresholds") or {}),
             metadata={
                 k: artifact.get(k) for k in ("version", "trained_at", "seed", "corpus", "metrics")
             },
@@ -82,21 +87,26 @@ class Localizer:
            step and the class head names the failure mode. This handles the five
            trained classes with 95% top-1 accuracy.
 
-        2. **Invariant tier.** When the supervised tier returns ``unknown`` —
-           either because the step confidence is below threshold or the class
-           head cannot name the failure — deterministic statistical invariant
-           rules activate. These catch zero-day failure classes whose
-           signatures are physically observable without training:
+        2. **Invariant tier.** When the supervised tier returns ``unknown``,
+           two distribution-relative checks look for a step that is extreme
+           against the TRAINING distribution: a token count below the 1st
+           percentile, or a state recurring above the 99th percentile.
+           Whichever deviation is larger flags its step.
 
-           * **Context truncation:** a sudden token-count collapse
-             (``token_z < -1.8``) on a step that has downstream errors.
-           * **Infinite loop:** a state-hash explosion
-             (``state_hash_repeat >= 4``) on a step that has downstream errors,
-             picking the first step that enters the cycle.
+           **The invariant tier localizes. It never names a class.**
+           ``predicted_class`` stays ``"unknown"`` when it fires, and
+           ``anomaly_signal`` records which check fired (``token_collapse``
+           or ``state_repetition``), which is an observation rather than a
+           diagnosis. An earlier version returned ``"context_truncation"``
+           and ``"infinite_loop"`` from hardcoded cut points. That was
+           circular: it hand-wrote detectors for the two classes the split
+           exists to withhold, so "generalizes to held-out classes" reduced
+           to "someone hardcoded these two". Naming a class the model was
+           never shown is not a claim this system can support. Saying
+           ``unknown`` while still pointing at the right step is the honest
+           version of the same result.
 
-        The invariant tier never overrides a confident supervised answer. It
-        only fires in the ``unknown`` regime, so the strict 5/2 class split is
-        preserved and no held-out class leaks into training.
+        The invariant tier never overrides a confident supervised answer.
         """
         frame = FeatureExtractor(self.stats, self.embedder).transform(run)
         run_row = run.get("run", {}) if isinstance(run, dict) else {}
@@ -127,21 +137,18 @@ class Localizer:
         # preserves the strict 5/2 split: the model never trains on these
         # classes, yet the system can still localize them through their
         # physical signatures.
-        invariant_used = None
+        anomaly_signal = None
         if predicted_class == "unknown":
             inv_result = self._invariant_check(frame)
             if inv_result is not None:
-                inv_step, inv_class = inv_result
-                # Override the flagged step and redistribute scores so the
-                # invariant-detected step dominates the heatmap.
-                flagged = inv_step
-                predicted_class = inv_class
-                class_confidence = 0.0  # not from the class head
+                flagged, anomaly_signal = inv_result
+                # Re-weight so the flagged step leads the heatmap. This is an
+                # anomaly, not a confident identification, so predicted_class
+                # deliberately stays "unknown".
                 scores = np.full(len(scores), 1.0)
                 scores[flagged] = 99.0
                 scores = scores / scores.sum() * 100.0
                 confidence = float(scores[flagged] / 100.0)
-                invariant_used = inv_class
 
         row = frame.iloc[flagged]
         evidence = {
@@ -165,56 +172,70 @@ class Localizer:
             "suggested_fixes": [],  # P1: filled by the Gemini explainer
             "class_confidence": round(class_confidence, 4),
             "unknown_reason": self._unknown_reason(
-                confidence, class_confidence, predicted_class, invariant_used
+                confidence, class_confidence, predicted_class, anomaly_signal
             ),
+            "anomaly_signal": anomaly_signal,
         }
 
     # -- statistical invariant rules ----------------------------------------
 
-    # Thresholds for the invariant tier. These are physical constants of the
-    # failure signatures, not learned parameters, so they do not violate the
-    # split discipline.
-    _TOKEN_Z_THRESHOLD = -1.8   # severe token-count collapse
-    _HASH_REPEAT_THRESHOLD = 4  # state-hash explosion (loop entry)
+    def _invariant_check(self, frame: pd.DataFrame) -> tuple[int, str] | None:
+        """Find a step that is extreme against the TRAINING distribution.
 
-    def _invariant_check(self, frame: "pd.DataFrame") -> tuple[int, str] | None:
-        """Check deterministic statistical invariants for zero-day classes.
-
-        Returns ``(step_index, predicted_class)`` if an invariant fires, else
-        ``None``. Only called when the supervised tier returned ``unknown``.
+        Returns ``(step_index, signal_name)`` or ``None``. The signal names an
+        observation (``token_collapse``, ``state_repetition``), never a
+        failure class. Cut points come from ``invariant_thresholds`` in
+        model/train.py, computed from training rows only, so nothing here is
+        derived from the held-out classes.
         """
-        tz = frame["token_z"].to_numpy()
-        shr = frame["state_hash_repeat"].to_numpy()
-        dec = frame["downstream_error_count"].to_numpy()
+        token_floor = self.invariant_thresholds.get("token_z_floor")
+        repeat_ceiling = self.invariant_thresholds.get("state_repeat_ceiling")
+        if token_floor is None or repeat_ceiling is None:
+            return None
 
-        # Invariant 1: context_truncation — sudden token crash before errors.
-        # The root-cause step is the one with the deepest token-count drop.
-        if (tz < self._TOKEN_Z_THRESHOLD).any() and (dec > 0).any():
-            candidate = int(np.argmin(tz))
-            if dec[candidate] > 0 or candidate < len(dec) - 1:
-                return candidate, "context_truncation"
+        tz = frame["token_z"].astype(float).to_numpy()
+        shr = frame["state_hash_repeat"].astype(float).to_numpy()
+        candidates: list[tuple[float, int, str]] = []
 
-        # Invariant 2: infinite_loop — state hash repeats >= threshold.
-        # The root-cause step is the FIRST step that enters the repeating
-        # cycle, because that is the decision a developer must change (see
-        # model/README.md). No downstream-error requirement: loops often
-        # exhaust the budget without propagating error flags downstream.
-        loop_mask = shr >= self._HASH_REPEAT_THRESHOLD
+        # A token count below the 1st percentile of training steps.
+        if (tz < token_floor).any():
+            step = int(np.nanargmin(tz))
+            candidates.append((float(token_floor - tz[step]), step, "token_collapse"))
+
+        # A state recurring more often than 99% of training steps. The flagged
+        # step is the FIRST of the repeating block, because that is the step a
+        # developer forks from, not the last symptom of the cycle.
+        loop_mask = shr > repeat_ceiling
         if loop_mask.any():
-            candidate = int(np.flatnonzero(loop_mask)[0])
-            return candidate, "infinite_loop"
+            step = int(np.flatnonzero(loop_mask)[0])
+            candidates.append((float(shr[step] - repeat_ceiling), step, "state_repetition"))
 
-        return None
+        if not candidates:
+            return None
+        _, step, signal = max(candidates, key=lambda c: c[0])  # largest deviation wins
+        return step, signal
 
     def _unknown_reason(
         self, confidence: float, class_confidence: float, predicted_class: str,
-        invariant_used: str | None = None,
+        anomaly_signal: str | None = None,
     ) -> str | None:
         """Why we declined to name a class, for the inspector panel."""
-        if invariant_used is not None:
-            return None  # invariant tier named it successfully
         if predicted_class != "unknown":
             return None
+        if anomaly_signal is not None:
+            label = {
+                "token_collapse": (
+                    "a token count below the 1st percentile of training steps"
+                ),
+                "state_repetition": (
+                    "a state recurring above the 99th percentile of training steps"
+                ),
+            }[anomaly_signal]
+            return (
+                f"flagged by a distribution check rather than the classifier: {label}. "
+                f"The failure mode is not one of the {len(self.trained_classes)} classes "
+                f"seen in training, so it is not named"
+            )
         if confidence < self.step_threshold:
             return (
                 f"top step confidence {confidence:.2f} is below the "

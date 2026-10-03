@@ -226,7 +226,6 @@ class Embedder:
             from sentence_transformers import SentenceTransformer
 
             self._model = SentenceTransformer(self.model_name)
-            print("✅ SUCCESS: Loaded SentenceTransformer from local HuggingFace cache.")
         return self._model
 
     def encode(self, texts: Sequence[str]) -> np.ndarray:
