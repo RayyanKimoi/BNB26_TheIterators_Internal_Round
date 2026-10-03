@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Env
+.env
+.env.local
+
+# Model artifacts and generated data
+model/artifacts/*.joblib
+generator/output/
+*.sqlite
+*.db
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# OS / editor
+.DS_Store
+Thumbs.db

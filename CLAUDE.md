@@ -8,12 +8,18 @@ Full spec is in PRD.md. Read the relevant section before building. This file is 
 ## Stack
 - Backend: FastAPI + SQLModel, Postgres via Supabase
 - Model: scikit-learn HistGradientBoosting, joblib. Embeddings: sentence-transformers all-MiniLM-L6-v2 (local)
-- LLM layer: Groq free tier, JSON-constrained output
+- LLM layer: Gemini free tier, model `gemini-3.5-flash-lite`, JSON-constrained output
 - Frontend: React + Vite + TypeScript, Tailwind + shadcn/ui (heavily restyled), Framer Motion
 - Agent: LangGraph + SqliteSaver
 
 ## Directory layout
-(fill this in as it forms — e.g. generator/, model/, backend/, frontend/, ingest/)
+- `generator/` synthetic trace generator, 7 injected fault classes
+- `model/` feature extraction, training, evaluation, SHAP. Artifacts in `model/artifacts/`
+- `backend/` FastAPI app, SQLModel schema, diagnosis contract, fork and replay
+- `ingest/` LangGraph checkpointer adapter, OpenTelemetry span endpoint
+- `replay/` checkpointed replay, deterministic suffix re-execution for forks
+- `frontend/` React + Vite + TypeScript dashboard
+- `.venv/` Python 3.13. Deps in `requirements.txt`, env template in `.env.example`
 
 ## Diagnosis contract — every consumer reads this exact shape
 {

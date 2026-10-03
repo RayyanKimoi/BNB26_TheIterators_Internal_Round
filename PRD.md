@@ -43,7 +43,7 @@ Every one of the seven required key features maps to a specific built component.
 | --- | --- | --- |
 | Execution Data | Synthetic trace generator with injected faults, plus a LangGraph checkpointer adapter and an OpenTelemetry ingest endpoint | `generator/`, `ingest/` |
 | Failure Diagnosis | HistGradientBoosting classifier scoring every step 0 to 100 for suspicion | `model/` |
-| Failure Explanation | Structured JSON diagnosis with field-level evidence, plus a Groq plain-English explanation | `POST /runs/{id}/diagnose` and `/explain` |
+| Failure Explanation | Structured JSON diagnosis with field-level evidence, plus a Gemini plain-English explanation | `POST /runs/{id}/diagnose` and `/explain` |
 | Checkpointed Replay | LangGraph `get_state_history` and `update_state` for real runs; stored step snapshots for synthetic runs | `replay/` |
 | Alternative Execution | Fork: deterministic suffix replay with the fix applied, original run immutable | `POST /runs/{id}/fork` |
 | Model Evaluation | Held-out failure-class split, per-class accuracy, baseline comparison | Model tab |
@@ -97,13 +97,21 @@ Embeddings come from `sentence-transformers` (`all-MiniLM-L6-v2`), local and fre
 - Top-1 localization accuracy on trained classes
 - Top-1 localization accuracy on held-out classes, reported separately and prominently
 - Top-3 accuracy, since a shortlist of three is still useful to a developer
-- Baseline comparison against always blaming the last step and against always blaming the first errored step
+- Four baselines: always blame the last step, always blame the first errored step, a pure anomaly-score heuristic, and an LLM-as-judge. Beating the LLM-as-judge baseline on your own chart is the slide that ends the comparison with every competing tool
 
 **Honesty rule.** Report whatever the real numbers are. A model that scores 70 percent on held-out classes with a clear baseline comparison is far more credible than a suspiciously perfect number, and judges who build models will know the difference.
 
+**Two jobs, never blurred.** The ML model is the detective: it decides which step is the root cause and how confident it is. The LLM is the explainer: it takes the model's evidence and renders it in plain English, then proposes fixes. The LLM never decides the flagged step. This division is what lets you claim a trained, evaluated model rather than an LLM wrapper, and it is the line judges will probe.
+
+**SHAP for model-level evidence.** Run SHAP on the classifier to show which features drove a step's score, for example semantic\_deviation +0.31, retrieval\_similarity +0.24, duration\_z +0.12. This answers the PS's "provide evidence" requirement at the level of the model's own reasoning, not just the raw feature values, and it is what makes the diagnosis defensible to a technical judge. SHAP values feed the inspector panel and seed the Gemini prompt.
+
+**Uncertainty handling.** When the top step's confidence falls below a threshold, return `predicted_class: "unknown"` rather than guessing. This directly satisfies the PS's requirement to distinguish confident decisions from cases where the evidence is insufficient, and an honest `unknown` rate reported alongside accuracy reads as rigor, not weakness.
+
+**Leave-one-class-out, if time allows.** Beyond the fixed held-out pair, rotate which class is held out and average the held-out accuracy across all seven. A single number that holds up under rotation is a stronger generalization claim than one lucky split. This is a reporting refinement, not new build work, so it is cheap if the pipeline is clean.
+
 ## Tech Stack and Architecture
 
-The FastAPI backend sits in the middle, tying together the Postgres database, the scikit-learn model, the Groq LLM, and Slack alerts behind one API.
+The FastAPI backend sits in the middle, tying together the Postgres database, the scikit-learn model, the Gemini LLM, and Slack alerts behind one API.
 
 &#91;embedded content: architecture · frontend, backend, model, LLM, alerts\]
 
@@ -116,7 +124,7 @@ The FastAPI backend sits in the middle, tying together the Postgres database, th
 | Backend | FastAPI + SQLModel | Typed, async, auto Swagger docs |
 | Embeddings | sentence-transformers, `all-MiniLM-L6-v2` | Local, free, no API dependency in the hot path |
 | Model | scikit-learn HistGradientBoosting, joblib | Trains in seconds, defensible, no GPU |
-| LLM layer | Groq free tier, JSON-constrained prompts | Near-instant inference matters on stage |
+| LLM layer | Gemini API free tier (`gemini-3.5-flash-lite`), JSON-constrained output | Explanations and fixes only; the ML model owns localization. Provider-swappable via env |
 | Frontend | React + Vite + TypeScript | Typed, fast dev loop |
 | Styling | Tailwind + shadcn/ui, heavily restyled | Polished base, overridden so it does not look like default shadcn |
 | Motion | Framer Motion | Scroll reveals, timeline transitions, fork animations |
@@ -140,16 +148,20 @@ Three tiers. P0 must be complete and working before any P1 work starts. P2 is on
 | 6 | Blame heatmap timeline UI | P0 | Every step scored 0 to 100, colour graded |
 | 7 | Fork with deterministic suffix replay | P0 | Outcome flip is the demo's peak moment |
 | 8 | Trace comparison, original versus fork | P0 | Required by the PS |
-| 9 | Groq plain-English root cause | P1 | Explains why, not just where |
+| 9 | Gemini plain-English root cause | P1 | Explains why, not just where |
 | 10 | Field-level fault localization | P1 | Points at `step[14].output.currency`, not just step 14 |
 | 11 | Suggested-fix diff view | P1 | Red and green inside the terminal frame |
 | 12 | LangGraph real-agent demo | P1 | Proves it works beyond synthetic data |
 | 13 | Slack or Discord structured alert | P1 | 30 minutes of work, large demo payoff |
-| 14 | Multiple fork candidates ranked | P2 | Groq proposes 2 to 3 fixes, fork all, show which passes |
+| 14 | Multiple fork candidates ranked | P2 | Gemini proposes 2 to 3 fixes, fork all, show which passes |
 | 15 | Diagnosis memory, similar past failures | P2 | Cosine similarity over stored diagnosis vectors |
 | 16 | Auto-generated regression test | P2 | Turns a confirmed fix into a permanent check |
 | 17 | Reliability dashboard, latency, tokens, cost | P2 | Rounds out the observability story |
 | 18 | OpenTelemetry ingest endpoint | P2 | Interoperability claim |
+
+Two items fold into the P0 model work rather than being separate build tasks: **`unknown` confidence handling** (return `unknown` below threshold, report the rate) and **the four baselines incl. LLM-as-judge**. **SHAP** is P1, feeding the inspector and the explainer prompt. **Leave-one-class-out** evaluation and **Optuna** tuning are reporting or tuning refinements, done only if P0 and P1 are solid, and never tuned against the held-out classes.
+
+**Explicitly future work, not built.** Transfer learning or fine-tuned embeddings, Trackio experiment tracking, and Hugging Face model hosting. These appear on a closing slide as "where this goes next." Attempting any of them inside 32 hours is the scope trap that sinks the core. A single sentence — we explored transfer learning and it did not beat the baseline — is worth more than hours spent making it true.
 
 ## Data Model
 
@@ -198,11 +210,11 @@ Six tables. The two additions over a naive schema that matter most: `parent_run_
 | run\_id | uuid | FK to agent\_runs |
 | flagged\_step\_index | int | Top-ranked step |
 | confidence | float | Model probability for the flagged step |
-| predicted\_class | text | One of the seven failure classes |
+| predicted\_class | text | One of the seven classes, or \`unknown\` when confidence is below threshold |
 | evidence\_path | text | Exact field, e.g. `step[14].output.currency` |
-| evidence | jsonb | Feature values that drove the score |
+| evidence | jsonb | Feature values plus SHAP attributions that drove the score |
 | feature\_vector | jsonb | Stored for similarity search in diagnosis memory |
-| explanation | text, null | Groq plain-English root cause |
+| explanation | text, null | Gemini plain-English root cause |
 | suggested\_fixes | jsonb, null | Ranked candidate fixes |
 | created\_at | timestamp | When diagnosed |
 
@@ -233,7 +245,7 @@ One row per step per diagnosis. This is what makes the heatmap show near-misses 
 | `/runs` | GET | List runs, filterable by status, class, source |
 | `/runs/{id}` | GET | Full trace with steps and stored suspicion scores |
 | `/runs/{id}/diagnose` | POST | Score every step, persist diagnosis and step\_scores, return the structured JSON |
-| `/runs/{id}/explain` | POST | Groq call on the flagged step, returns explanation and ranked suggested fixes |
+| `/runs/{id}/explain` | POST | Gemini call on the flagged step with the ML evidence, returns explanation and ranked suggested fixes |
 | `/runs/{id}/fork` | POST | Body: `{from_step, fix}`. Creates a child run, replays the suffix, returns the new run id and outcome |
 | `/runs/{id}/compare/{other_id}` | GET | Aligned step-by-step diff between two runs |
 | `/runs/{id}/similar` | GET | Past diagnoses with nearby feature vectors |
@@ -256,6 +268,11 @@ One row per step per diagnosis. This is what makes the heatmap show near-misses 
     "duration_z": 2.4,
     "arg_novelty": 0.0
   },
+  "shap": {
+    "semantic_deviation": 0.31,
+    "retrieval_similarity": 0.24,
+    "duration_z": 0.12
+  },
   "step_scores": [2, 4, 1, 88, 11],
   "explanation": "Step 14 returned a cached rate quote from an earlier query...",
   "suggested_fixes": [
@@ -263,6 +280,8 @@ One row per step per diagnosis. This is what makes the heatmap show near-misses 
   ]
 }
 ```
+
+`predicted_class` is `"unknown"` when confidence is below threshold. `shap` carries the model-level feature attributions, `evidence` the raw values; the inspector shows both, and the explainer prompt is seeded from them.
 
 ## Design System
 
@@ -325,7 +344,7 @@ No purple gradients. No emoji icons. No fake metrics, counters or testimonials. 
 | Insights | Aggregate view | Reliability over time, failure mix, latency, token and cost trends, diagnosis memory matches |
 | Settings | Configuration | Webhook URL, API key, ingest endpoint, held-out class config |
 
-**The inspector panel**, opened by clicking any step in Trace, stacks three blocks: evidence as structured JSON in a terminal frame with the broken field path highlighted; the Groq explanation in plain English; and the suggested fix as a red and green diff with a Fork from here button.
+**The inspector panel**, opened by clicking any step in Trace, stacks three blocks: evidence as structured JSON in a terminal frame with the broken field path highlighted; the Gemini explanation in plain English; and the suggested fix as a red and green diff with a Fork from here button.
 
 **Primary flow.** Login, Runs, open a failed run, read the heatmap, click the red step, read evidence and explanation, review the fix diff, Fork from here, watch the suffix replay in the Forks tab, outcome flips to pass, save as regression test. That path exercises all seven PS key features in one continuous motion, which is exactly what the demo should be.
 
@@ -340,7 +359,7 @@ Four gated phases. Each gate is a hard stop: if the gate is not met, you do not 
 | 0 to 3 | Setup | Repo, Supabase schema, env config, trace schema frozen, LangGraph demo agent skeleton, design tokens in Tailwind | Schema frozen and agreed. Changing it later is the most expensive mistake available |
 | 3 to 12 | Core pipeline | Generator with 7 fault classes, 200+ runs, feature extraction, model trained, held-out evaluation with baselines | Model beats the last-step baseline on held-out classes. If it does not, the pitch has no centre |
 | 12 to 22 | API and UI | FastAPI endpoints, diagnosis contract, Trace heatmap, inspector, fork with suffix replay, comparison view | Full primary flow works end to end locally |
-| 22 to 32 | Novelty, polish, deploy | Groq explanation and fixes, diff view, Slack alert, landing page, deploy, rehearse | Deployed by hour 26. Rehearsed three times by hour 30 |
+| 22 to 32 | Novelty, polish, deploy | Gemini explanation and fixes, SHAP, diff view, Slack alert, landing page, deploy, rehearse | Deployed by hour 26. Rehearsed three times by hour 30 |
 
 **Parallelization.** With a team, split along the API contract: one person owns generator plus model, one owns backend plus fork logic, one owns frontend. Freeze the diagnosis JSON contract in hour 3 so the frontend can build against mock data immediately rather than waiting on the model.
 
@@ -374,7 +393,7 @@ Four gated phases. Each gate is a hard stop: if the gate is not met, you do not 
 2. Open the deployed dashboard. Runs list, one failed run.
 3. Open it. The heatmap renders, step 14 red, a couple of amber near-misses. Say out loud that every step is scored, not just one flagged.
 4. Click step 14. Evidence JSON with the exact broken field path. This is the field-level claim, say it.
-5. Explain. Groq's plain-English root cause appears live.
+5. Explain. Gemini's plain-English root cause appears live.
 6. Suggest Fix. Red and green diff.
 7. Fork from here. The suffix replays visibly. Outcome flips FAIL to SUCCESS, 3 of 12 steps re-executed. This is the peak; pause here.
 8. Model tab. Held-out class accuracy against the baseline. This is the slide that separates the project from an LLM wrapper.
@@ -397,7 +416,7 @@ Four minutes, rehearsed three times minimum. The Model tab is non-negotiable eve
 | Model does not beat the baseline on held-out classes | Medium | Make the two held-out classes structurally distinct (`infinite_loop` has a repeat-hash signature, `context_truncation` a token-drop signature) so generalization is plausible rather than hoped for. Check this at hour 12, not hour 30 |
 | Trace schema changes after the UI is built | Medium | Freeze the schema and the diagnosis contract at hour 3. This is the single most expensive thing to change late |
 | Scope creep into P2 before P0 is solid | High | The tier gates exist for this. No P1 work until all eight P0 items pass their gate |
-| Groq rate limits during rehearsal or demo | Medium | Cache explanations for the demo run. Keep a pre-generated fallback in the database |
+| Gemini rate limits during rehearsal or demo | Medium | Cache explanations for the demo run. Keep a pre-generated fallback in the database. The layer is env-swappable behind one provider interface, so an alternative provider is a drop-in if Gemini limits bite |
 | Deploy or network failure on stage | Medium | Deploy by hour 26. Record a full backup video by hour 30. Rehearse once against the live URL on venue wifi |
 | LangGraph integration eats time it does not deserve | Medium | It is P1, not P0. Synthetic traces alone satisfy every PS requirement. Cut it without regret if hour 22 arrives and the core is shaky |
 | UI looks like default shadcn | Medium | Design tokens applied first, in hour 3, before any component is built. Retrofitting a visual identity never works |
