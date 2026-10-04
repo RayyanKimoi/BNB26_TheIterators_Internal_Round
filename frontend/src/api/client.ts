@@ -11,6 +11,8 @@
  * a 422, and both are flattened to a readable message here.
  */
 
+import { engineHeaders } from '../lib/engineProvider';
+
 import type {
   CompareResponse,
   DiagnosisResponse,
@@ -77,6 +79,8 @@ function messageFromDetail(detail: unknown, fallback: string): string {
 }
 
 interface RequestOptions {
+  /** Extra request headers, merged over the defaults. */
+  headers?: Record<string, string>;
   method?: 'GET' | 'POST';
   body?: unknown;
   signal?: AbortSignal;
@@ -84,7 +88,7 @@ interface RequestOptions {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const { method = 'GET', body, signal, timeoutMs = DEFAULT_TIMEOUT_MS, headers } = options;
 
   // An inner controller enforces the timeout; the caller's signal still wins.
   const controller = new AbortController();
@@ -96,7 +100,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: {
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...headers,
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     });
@@ -161,6 +168,9 @@ export const api = {
       method: 'POST',
       signal,
       timeoutMs: SLOW_TIMEOUT_MS,
+      // Empty unless a non-default engine is selected, so the default path
+      // sends exactly the request it always did.
+      headers: engineHeaders(),
     });
   },
 

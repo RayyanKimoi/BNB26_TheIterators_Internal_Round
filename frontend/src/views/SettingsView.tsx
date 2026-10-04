@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 
 import { API_BASE_URL, api } from '../api/client';
 import { ErrorState } from '../components/AppShell';
+import { EngineProviderPanel } from '../components/EngineProviderPanel';
 import type { SettingsResponse } from '../types/api';
 
 function StatusDot({ on, label }: { on: boolean; label: string }) {
@@ -172,7 +173,7 @@ export function SettingsView() {
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="flex flex-col gap-4">
       <motion.div variants={item} className="hairline bg-panel p-4">
-        <p className="data text-muted">Configuration status</p>
+        <h2 className="card-title">Configuration status</h2>
         <p className="data mt-1 text-muted">
           Read from the running backend. Secrets are reported as present or absent and never sent
           to the browser.
@@ -198,8 +199,12 @@ export function SettingsView() {
         </dl>
       </motion.div>
 
+      <motion.div variants={item}>
+        <EngineProviderPanel />
+      </motion.div>
+
       <motion.div variants={item} className="hairline bg-panel p-4">
-        <p className="data text-muted">Alerts and keys</p>
+        <h2 className="card-title">Alerts and keys</h2>
         <p className="data mt-1 leading-relaxed text-muted">
           These are server-side secrets, so they are set in the backend&apos;s .env file and the
           server is restarted, not edited from this page. A Slack alert fires at the end of every
@@ -211,7 +216,7 @@ export function SettingsView() {
       </motion.div>
 
       <motion.div variants={item} className="hairline bg-panel p-4">
-        <p className="data text-muted">OpenTelemetry ingestion</p>
+        <h2 className="card-title">OpenTelemetry ingestion</h2>
         <p className="data mt-1 leading-relaxed text-muted">
           POST a simplified OTel-shaped trace and it becomes a run with scored steps, exactly like
           a synthetic one. Spans are ordered by start time; `input.` and `output.` prefixed
@@ -224,7 +229,7 @@ export function SettingsView() {
       </motion.div>
 
       <motion.div variants={item} className="hairline bg-panel p-4">
-        <p className="data text-muted">Failure class split</p>
+        <h2 className="card-title">Failure class split</h2>
         <p className="data mt-1 leading-relaxed text-muted">
           Fixed at training time and baked into the model artifact. Changing it means editing
           model/dataset.py and rerunning python -m model.train, which is why it is shown here

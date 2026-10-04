@@ -24,12 +24,13 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlmodel import Session, select
 
 from backend.alerts import send_diagnosis_alert
+from backend.engine_selector import run_selected_diagnosis_sync
 from backend.db import AgentRun, Diagnosis, RegressionTest, Step, StepScore
 from backend.engine import create_db_and_tables, get_session
 from backend.explainer import ExplainerClient, GeminiExplainer, explain
@@ -402,7 +403,30 @@ def get_evaluation():
 # ---------------------------------------------------------------------------
 
 @app.post("/runs/{run_id}/diagnose", response_model=DiagnosisResponse)
-def diagnose_run(run_id: str, session: Session = Depends(get_session)):
+def diagnose_run(
+    run_id: str,
+    response: Response,
+    session: Session = Depends(get_session),
+    x_engine_provider: str | None = Header(
+        default=None,
+        description=(
+            "Which diagnosis engine to use. Omitted or unrecognised means the "
+            "local hybrid engine. A remote provider that is unconfigured, slow "
+            "or broken falls back to local, so this is a preference, not a "
+            "guarantee: read the X-Engine-Used response header for what ran."
+        ),
+    ),
+    x_engine_key: str | None = Header(
+        default=None,
+        description=(
+            "Bring-your-own API key for a hosted provider such as Groq. Used "
+            "for this request only: never stored, never logged, and ignored "
+            "when the server has its own key configured. Prefer setting "
+            "GROQ_API_KEY server-side; this exists so a key does not have to "
+            "live on the server to try a provider out."
+        ),
+    ),
+):
     """Score every step using the Hybrid Sentry Engine, save to DB, return result.
 
     The Hybrid Engine:
@@ -429,9 +453,21 @@ def diagnose_run(run_id: str, session: Session = Depends(get_session)):
     # Convert DB rows to the dict format the Localizer expects
     trace_dict = _run_to_trace_dict(run, steps)
 
-    # Run the Hybrid Sentry Engine
-    localizer = _get_localizer()
-    raw_diagnosis = localizer.diagnose(trace_dict)
+    # Run the selected engine. Defaults to, and falls back to, the local
+    # Hybrid Sentry Engine, so this path behaves exactly as it did before the
+    # selector existed whenever no remote provider is configured.
+    raw_diagnosis = run_selected_diagnosis_sync(
+        provider_type=x_engine_provider,
+        feature_vector=None,
+        trace_data=trace_dict,
+        api_key=x_engine_key,
+    )
+
+    # Which engine actually ran, which is not always the one requested. Sent
+    # as a header rather than a body field: the 13-key diagnosis contract is
+    # consumed by the UI, the Slack alert and the regression-test generator
+    # alike, and widening it for a transport detail would fork that shape.
+    response.headers["X-Engine-Used"] = raw_diagnosis.get("engine_used", "default")
 
     # SHAP fills the `shap` contract field, which was previously always null.
     raw_diagnosis["shap"] = _shap_for(trace_dict, raw_diagnosis["flagged_step_index"])

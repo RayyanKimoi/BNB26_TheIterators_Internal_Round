@@ -124,6 +124,23 @@
    * a showcase surface where the constant glow is the point. Pair it with
    * `hairline`, which supplies the 1px border this recolours.
    */
+  /*
+   * Card headings. Bigger, bolder and lit in the accent, because the panels
+   * all opened with the same small muted line and the eye had nothing to
+   * anchor on. text-shadow rather than a box glow: the halo should follow the
+   * glyphs, not sit behind a rectangle.
+   */
+  .card-title {
+    font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+    font-size: 1.0625rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--color-accent);
+    text-shadow:
+      0 0 14px color-mix(in oklab, var(--color-accent) 45%, transparent),
+      0 0 30px color-mix(in oklab, var(--color-accent) 20%, transparent);
+  }
+
   .glow-accent {
     border-color: color-mix(in oklab, var(--color-accent) 34%, transparent);
     box-shadow:

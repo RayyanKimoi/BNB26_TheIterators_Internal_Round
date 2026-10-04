@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 
 import { api, ApiError } from '../api/client';
 import { LoadingState } from './AppShell';
+import { EngineBadge } from './EngineProviderPanel';
 import type {
   DiagnosisResponse,
   ExplanationResponse,
@@ -556,22 +557,25 @@ export function StepInspector({
                   {step.tool_name ?? step.action_type} · {step.duration_ms} ms · {step.tokens} tokens
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Close inspector"
-                className="data hairline rounded p-1.5 text-muted transition-colors hover:border-accent/60 hover:text-accent"
-              >
-                <svg viewBox="0 0 16 16" className="size-4" aria-hidden="true">
-                  <path
-                    d="M4 4l8 8M12 4l-8 8"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    fill="none"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <EngineBadge />
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Close inspector"
+                  className="data hairline rounded p-1.5 text-muted transition-colors hover:border-accent/60 hover:text-accent"
+                >
+                  <svg viewBox="0 0 16 16" className="size-4" aria-hidden="true">
+                    <path
+                      d="M4 4l8 8M12 4l-8 8"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      fill="none"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-5 py-4">
