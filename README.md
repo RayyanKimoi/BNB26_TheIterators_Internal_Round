@@ -17,12 +17,6 @@
 > numbers only. Never invent a metric"* — a README that oversold would violate the
 > thing it documents.
 
-| | |
-| --- | --- |
-| **Dashboard** | http://localhost:5173/ |
-| **API docs** | http://localhost:8000/docs |
-| **Deep dive** | [`PROJECT_MASTER_GUIDE.md`](PROJECT_MASTER_GUIDE.md) |
-| **Spec** | [`PRD.md`](PRD.md) · **Engineering log** [`PROJECT_STATUS.md`](PROJECT_STATUS.md) |
 
 ---
 
