@@ -5,8 +5,8 @@
 ![Trained-class accuracy](https://img.shields.io/badge/trained--class_top--1-95.0%25-5BC98C?style=flat-square)
 ![Held-out accuracy](https://img.shields.io/badge/held--out_top--1-52.5%25-7DF9C4?style=flat-square)
 ![Best baseline](https://img.shields.io/badge/best_baseline_(LLM--judge)-32.5%25-8A8A92?style=flat-square)
-![Detection rate](https://img.shields.io/badge/fault_detection-98.7%25-5BC98C?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-166_passing-5BC98C?style=flat-square)
+![Detection rate](https://img.shields.io/badge/fault_detection-98.8%25-5BC98C?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-212_passing-5BC98C?style=flat-square)
 ![Contracts](https://img.shields.io/badge/TS↔Pydantic_contracts-23%2F23-5BC98C?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.13.7-blue?style=flat-square)
 ![React](https://img.shields.io/badge/react-19.2.8-blue?style=flat-square)
@@ -31,6 +31,7 @@
 - [7. Technology stack](#7-technology-stack)
 - [8. Feature inventory](#8-feature-inventory)
 - [9. API surface and the diagnosis contract](#9-api-surface-and-the-diagnosis-contract)
+- [9a. Pluggable diagnosis engines](#9a-pluggable-diagnosis-engines)
 - [10. User journey](#10-user-journey)
 - [11. Integrations](#11-integrations)
 - [12. Honest limitations](#12-honest-limitations)
@@ -94,9 +95,9 @@ Measured 2026-10-04 on the live system.
 | **Trained-class top-1** | **95.0%** | Correct step localized on the 5 fault classes present in training (n = 20 runs) |
 | **Held-out top-1, hybrid engine** | **52.5%** | Correct step on 2 fault classes **never seen in training** (n = 40 runs) |
 | **Held-out top-1, classifier alone** | **7.5%** | The supervised head by itself does **not** generalize. This is why the invariant tier exists |
-| **Fault detection rate** | **98.7%** | 155 of 157 failed runs carry a stored diagnosis |
+| **Fault detection rate** | **98.8%** | 159 of 161 failed runs carry a stored diagnosis |
 | **Trained-class top-3** | **100%** | The right step is always in the top 3 |
-| **Corpus** | **258 runs** | 157 failed, 101 successful, all 7 fault classes. Grows as forks are created |
+| **Corpus** | **268 runs** | 161 failed, 107 successful, all 7 fault classes. Grows as forks are created |
 | **LOCO mean** | **0.212** | Leave-one-class-out, flat across classes. Reported, not hidden |
 
 ### Baseline comparison — the number the pitch rests on
@@ -286,7 +287,7 @@ one you can trust when it does not.
 
 **1. Synthetic trace generator and seed corpus.** `generator/` produces realistic
 multi-step traces with faults injected deliberately, so ground truth is known.
-`backend/seed_corpus.py` is an idempotent loader. 258 runs live.
+`backend/seed_corpus.py` is an idempotent loader. 268 runs live.
 
 **2. Seven failure classes.**
 
@@ -347,10 +348,16 @@ confirmed fix into a permanent assertion.
 **18. OpenTelemetry ingest.** `POST /ingest/otel`.
 
 **— Reliability dashboard.** `GET /dashboard/reliability` with Recharts on Insights:
-pass rate over time, failure mix, latency, token trends. Live: 258 runs, 39.15% pass
-rate, 1,116,813 total tokens. **Cost is deliberately absent** — no token rate is
+pass rate over time, failure mix, latency, token trends. Live: 268 runs, 39.93% pass
+rate, 1,153,520 total tokens. **Cost is deliberately absent** — no token rate is
 configured, so `estimated_cost_usd` returns `null` and the UI omits the metric rather
 than fabricating one.
+
+**20. Pluggable diagnosis engines.** `backend/engine_selector.py`. Routes
+diagnosis to Groq, a custom LLM, an enterprise webhook or an on-prem model via
+an optional header, with the local engine as default and fallback. Full detail
+in [section 9a](#9a-pluggable-diagnosis-engines). Added after the PRD feature
+table was complete, so it is not one of the 18.
 
 **19. Visual design system.** Dark, terminal-adjacent, no purple anywhere.
 
@@ -441,6 +448,83 @@ Two notes for anyone consuming this:
   called.** They are populated by Gemini on demand, not during diagnosis, so that
   diagnosis stays fast and fully offline-capable.
 
+## 9a. Pluggable diagnosis engines
+
+Diagnosis can be routed to a provider other than the local engine. The router
+is `backend/engine_selector.py`; nothing in `model/predict.py` or the existing
+diagnosis path was modified to add it.
+
+Select one with an optional header on `POST /runs/{id}/diagnose`:
+
+```bash
+curl -X POST http://localhost:8000/runs/{id}/diagnose   -H "X-Engine-Provider: groq"
+```
+
+| Provider | Header value | Configured by | Wired |
+| --- | --- | --- | --- |
+| Local hybrid engine | `default`, or omit the header | nothing, always available | yes |
+| Groq (LLM as judge) | `groq` | `GROQ_API_KEY`, `GROQ_MODEL` | yes |
+| Custom OpenAI / Anthropic | `custom_llm` or `byo_llm` | `ENGINE_CUSTOM_LLM_URL` | transport only |
+| Enterprise webhook | `webhook` or `enterprise_webhook` | `ENGINE_WEBHOOK_URL` | transport only |
+| Air-gapped local model | `air_gapped` | `ENGINE_AIR_GAPPED_URL` | transport only |
+
+**The local engine is the floor.** A provider that is unconfigured, times out,
+errors, or returns a payload that is not a valid diagnosis falls back to local
+and the request still succeeds. Diagnosis never fails because an optional
+remote is down. The `X-Engine-Used` response header names the engine that
+actually ran, which is not always the one requested.
+
+**Endpoint URLs come from server-side environment variables, never from the
+request.** The header selects *which configured provider* to use; it cannot
+supply a URL. Letting a caller name an endpoint that the server then POSTs an
+internal trace to is server-side request forgery, and the trace is exactly the
+payload worth exfiltrating. There is a test asserting that a URL passed as a
+provider name resolves to local instead of being dialled.
+
+### Groq makes localization worse, on purpose
+
+Routing to Groq runs `model/judge.py`'s prompt, which is to say it *is* the
+LLM-as-judge baseline from section 3, served by Groq instead of Gemini:
+
+| Engine | Trained classes | Held-out classes |
+| --- | --- | --- |
+| Hybrid (local) | 95.0% | **52.5%** |
+| Groq / LLM judge | 80.0% | **32.5%** |
+
+Measured live on one `stale_retrieval` run, ground truth step 8:
+
+| Engine | Flagged | Class | Correct |
+| --- | --- | --- | --- |
+| Hybrid | 8 | `stale_retrieval` | **yes** |
+| Groq (`openai/gpt-oss-120b`) | 10 | `premature_termination` | no |
+
+Groq's answer was fluent and wrong. The provider exists for flexibility, not
+for accuracy, and the UI says so where you select it.
+
+An LLM also returns a point estimate rather than a distribution, so a Groq
+diagnosis carries `evidence: {}`, `shap: null`, `class_confidence: 0.0`, and a
+`step_scores` spike rather than a graded curve. Those fields are empty because
+no features were extracted. Filling them with plausible numbers would be
+fabricating evidence.
+
+### Keys
+
+`GROQ_API_KEY` in the server environment is the preferred arrangement and
+always wins. A key may also be sent per-request as `X-Engine-Key` for the
+bring-your-own-key flow; it is used for that request only, never stored and
+never logged. The dashboard holds such a key in memory for the tab session and
+deliberately never writes it to browser storage, where any script reaching the
+origin could read it.
+
+Model ids differ per account, and a 404 from Groq means your key cannot reach
+that model rather than that the endpoint is wrong. List what a key can use:
+
+```bash
+curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"
+```
+
+---
+
 ## 10. User journey
 
 ### Landing
@@ -457,7 +541,7 @@ order are unchanged.)
 
 ### `/runs` — survey the damage
 
-All 258 runs in a high-density table: status, task type, injected class, tokens,
+All 268 runs in a high-density table: status, task type, injected class, tokens,
 duration, whether a diagnosis exists. A metrics header summarizes pass rate and failure
 mix; a filter bar narrows by status, class and source.
 
@@ -506,7 +590,8 @@ than buried.
 ### `/settings` — configuration
 
 Read-only status: Gemini configured, Slack configured, database dialect, model artifact
-present, trained versus held-out classes. **It never returns secret values** — only
+present, trained versus held-out classes. It also carries the diagnosis engine
+selector (section 9a), which is the one control on the page that writes anything. **It never returns secret values** — only
 whether each is configured. Read-only because no settings persistence layer exists, and
 an editable form that silently discarded input would be a lie told in UI.
 
@@ -575,6 +660,12 @@ Disclosing these is what makes the rest credible.
 10. **Settings is read-only** because no settings persistence layer exists.
 11. **The top bar deviates from `PRD.md`**, which specifies a left sidebar. Deliberate,
     at the product owner's request, documented in `components/TopNav.tsx`.
+12. **Only two diagnosis engines are wired**, local and Groq. The custom-LLM,
+    webhook and air-gapped providers have working transport and fallback but no
+    service behind them, and the UI labels them as such.
+13. **Groq is worse, not better.** Selecting it swaps the trained localizer for
+    the LLM-as-judge baseline it was built to beat. It exists for provider
+    flexibility only.
 
 ## 13. Quickstart
 
@@ -608,6 +699,12 @@ Fill in the keys you need. **Never commit `.env`.**
 | `GEMINI_API_KEY` | for explain | Google Gemini free-tier key |
 | `GEMINI_MODEL` | no | Defaults to `gemini-3.5-flash-lite` |
 | `SLACK_WEBHOOK_URL` | no | Enables alerts. Everything degrades gracefully without it |
+| `GROQ_API_KEY` | for Groq | Enables the Groq provider. Server-side keys take precedence over any sent per request |
+| `GROQ_MODEL` | no | Defaults to `openai/gpt-oss-120b`. Availability differs per key |
+| `GROQ_TIMEOUT_S` | no | Defaults to 20. LLM inference needs far longer than the 2s a scoring webhook gets |
+| `ENGINE_CUSTOM_LLM_URL` | no | Remote scoring endpoint. Read server-side only, never from the request |
+| `ENGINE_WEBHOOK_URL` | no | As above |
+| `ENGINE_AIR_GAPPED_URL` | no | As above |
 | `DASHBOARD_BASE_URL` | for alerts | Base for Slack deep links, `{base}/trace/{run_id}`. Defaults to `http://localhost:5173`. **Set this in any deployed environment** or every alert links people at their own laptop |
 | `CONFIDENCE_THRESHOLD` | no | Below this, the class head returns `unknown`. Defaults to `0.5` |
 | `MODEL_PATH` | no | Defaults to `model/artifacts/localizer.joblib` |
@@ -653,7 +750,7 @@ npm run dev
 ## 14. Verification
 
 ```bash
-# Full Python suite — 166 tests
+# Full Python suite — 212 tests
 .venv/Scripts/python.exe -m pytest -q
 
 # End-to-end integration check against a live DB
@@ -673,7 +770,7 @@ Expected on a healthy tree:
 
 | Check | Expected |
 | --- | --- |
-| `pytest -q` | 166 passed |
+| `pytest -q` | 212 passed |
 | `backend.test_backend` | `TEST: PASSED` |
 | `npm run verify` | `contract check passed. DiagnosisResponse carries 13 keys.` |
 | `npx tsc -b` | no output |
@@ -694,6 +791,7 @@ Expected on a healthy tree:
 │   ├── main.py     12 endpoints
 │   ├── models.py   DiagnosisResponse — the contract, source of truth
 │   ├── alerts.py   Slack Block Kit, non-blocking
+│   ├── engine_selector.py  pluggable engines, local engine as the floor
 │   └── explainer.py  Gemini root cause + ranked patches
 ├── ingest/         LangGraph checkpointer adapter, OTel span mapping
 ├── replay/         checkpointed replay, deterministic suffix re-execution

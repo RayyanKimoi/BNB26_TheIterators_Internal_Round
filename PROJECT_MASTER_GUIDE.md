@@ -68,8 +68,8 @@ it is also where the honest caveat lives.
 | **Held-out-class top-1, hybrid engine** | **52.5%** | Correct step on 2 fault classes the model **never saw in training**. n = 40 runs |
 | Held-out-class top-1, **classifier alone** | **7.5%** | The supervised head by itself does **not** generalize. This number is why the invariant tier exists |
 | Best baseline on held-out classes | **32.5%** | LLM-as-judge (Gemini). The hybrid engine beats it by **20 points** |
-| Fault detection rate | **98.7%** | 155 of 157 failed runs carry a stored diagnosis |
-| Corpus size | **258 runs** | Live in Supabase Postgres. Grows as forks are created |
+| Fault detection rate | **98.8%** | 159 of 161 failed runs carry a stored diagnosis |
+| Corpus size | **268 runs** | Live in Supabase Postgres. Grows as forks are created |
 | Top-3 accuracy, trained classes | **100%** | The right step is always in the top 3 |
 
 **Baseline comparison, the number the whole pitch rests on:**
@@ -293,6 +293,19 @@ All 11 PRD endpoints, plus `/settings`.
 | `/ingest/otel` | POST | Accept OTel spans into the trace schema |
 | `/settings` | GET | Read-only config status. Never returns secret values |
 
+`POST /runs/{id}/diagnose` also accepts two optional headers, added by
+`backend/engine_selector.py`: `X-Engine-Provider` selects a diagnosis engine
+(`default`, `groq`, `custom_llm`, `webhook`, `air_gapped`) and `X-Engine-Key`
+carries a bring-your-own key for one request. The local hybrid engine is the
+default and the fallback for every failure mode, so diagnosis never fails
+because an optional remote is down, and `X-Engine-Used` on the response names
+the engine that actually ran. Endpoint URLs resolve from server-side
+environment variables and never from the request, which is what stops the
+header being an SSRF vector. Routing to Groq runs `model/judge.py`'s prompt,
+making it the LLM-as-judge baseline served by Groq: 32.5% on held-out classes
+against the hybrid engine's 52.5%, so it is a flexibility feature, not an
+accuracy one.
+
 ---
 
 ## 4. Every feature, exhaustively
@@ -306,8 +319,8 @@ All 11 PRD endpoints, plus `/settings`.
 
 **1. Synthetic trace generator and seed corpus.** `generator/`. Produces realistic
 multi-step agent traces across task types with faults injected deliberately, so ground
-truth is known. `backend/seed_corpus.py` is an idempotent loader. **258 runs live**:
-157 failed, 101 successful, spanning all 7 fault classes plus clean runs.
+truth is known. `backend/seed_corpus.py` is an idempotent loader. **268 runs live**:
+161 failed, 107 successful, spanning all 7 fault classes plus clean runs.
 
 **2. Seven failure classes.** Five trained on, two held out entirely and never seen
 during training:
@@ -378,10 +391,18 @@ confirmed fix into a permanent assertion.
 **18. OpenTelemetry ingest.** `POST /ingest/otel`. The interoperability claim.
 
 **— Reliability dashboard.** `GET /dashboard/reliability` with Recharts on the Insights
-tab: pass rate over time, failure mix, latency, token trends. Live values: 258 runs,
-39.15% overall pass rate, 1,116,813 total tokens. **Cost is not displayed**, because no
+tab: pass rate over time, failure mix, latency, token trends. Live values: 268 runs,
+39.93% overall pass rate, 1,153,520 total tokens. **Cost is not displayed**, because no
 token cost rate is configured and the system will not invent one — `estimated_cost_usd`
 returns `null` and the UI omits the metric rather than fabricating it.
+
+**20. Pluggable diagnosis engines.** `backend/engine_selector.py`. An optional
+`X-Engine-Provider` header on `POST /runs/{id}/diagnose` routes diagnosis to
+Groq, a custom LLM, an enterprise webhook or an on-prem model, with the local
+hybrid engine as both default and fallback for every failure mode. Endpoint
+URLs resolve server-side, never from the request, so the header cannot be used
+for SSRF. Only local and Groq have a service behind them today. Not a PRD
+feature; added after the feature table was complete.
 
 **19. Visual design system.** Dark, terminal-adjacent, no purple anywhere. Tokens:
 bg `#0A0A0B`, panel `#111113`, border `#1F1F23`, text `#E8E8E8`, muted `#8A8A92`,
@@ -433,7 +454,7 @@ documented deviation at the product owner's request. Tab set and order are uncha
 
 ### Stage 1 — Runs: survey the damage
 
-The Runs tab lists all 258 runs in a high-density table: status, task type, injected
+The Runs tab lists all 268 runs in a high-density table: status, task type, injected
 class, token count, duration, whether a diagnosis exists. A metrics header summarizes
 pass rate and failure mix; a filter bar narrows by status, class and source. The user
 scans for red.
@@ -526,6 +547,12 @@ If you are an AI model reading this file to produce collateral, follow these rul
    timestamps.
 6. **Do not describe the stack as React 18, Python 3.11, or SQLite-primary.** See
    section 2.
+7. **Never present Groq or any other provider as an upgrade.** Routing to Groq
+   runs the LLM-as-judge baseline: 32.5% held out against the hybrid engine's
+   52.5%. It is a flexibility feature and it makes localization worse. Say so.
+8. **Only local and Groq are wired.** The custom-LLM, webhook and air-gapped
+   providers have transport and fallback but no deployed service. Do not imply
+   a working integration that does not exist.
 
 ### 6.2 Where to find things
 
@@ -540,6 +567,7 @@ If you are an AI model reading this file to produce collateral, follow these rul
 | The JSON contract | §3.4 |
 | Feature inventory | §4 |
 | Slack specifics | §4.1 |
+| Engine providers, Groq caveat | §4 item 20, §3.6 |
 | User journey, screen by screen | §5 |
 | Demo timing | §7 |
 | What not to overclaim | §8 |
@@ -576,9 +604,9 @@ If you are an AI model reading this file to produce collateral, follow these rul
 
 ### 0:40 – 1:20 · The run
 
-*Runs tab, 258 runs. Click a failed `stale_retrieval` run.*
+*Runs tab, 268 runs. Click a failed `stale_retrieval` run.*
 
-> "258 real traces. This one failed. Here's the blame heatmap — every step scored for
+> "268 real traces. This one failed. Here's the blame heatmap — every step scored for
 > how much it contributed.
 >
 > Notice the gap. The run threw at step 12. The blame is at **step 8**, scored 60 out of
@@ -686,6 +714,10 @@ Carry these into every conversation. Disclosing them is what makes the rest cred
 10. **Settings is read-only** because no settings persistence layer exists.
 11. **The top bar deviates from `PRD.md`**, which specifies a left sidebar. Deliberate,
     at the product owner's request, documented in `components/TopNav.tsx`.
+12. **Only two diagnosis engines are actually wired**, local and Groq. The
+    custom-LLM, webhook and air-gapped providers have working transport and
+    fallback but no deployed service behind them, and the UI labels them as
+    such rather than implying a live switch.
 
 ---
 
@@ -698,7 +730,7 @@ Carry these into every conversation. Disclosing them is what makes the rest cred
 # Frontend
 cd frontend && npm run dev
 
-# Full test suite (166 tests)
+# Full test suite (212 tests)
 .venv/Scripts/python.exe -m pytest -q
 
 # Integration check

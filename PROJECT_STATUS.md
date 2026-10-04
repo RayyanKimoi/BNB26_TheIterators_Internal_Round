@@ -23,8 +23,10 @@ quoting anything.
   and a model benchmarks view — all reading live data, nothing hardcoded.
 - **The 240-run synthetic corpus is seeded into the live Supabase database**
   (idempotent loader: `backend/seed_corpus.py`), diagnosed, and demo-ready. The
-  live `agent_runs` table currently holds **251 rows** (240 corpus + a handful
-  of forks and ingest tests created while verifying this session's work).
+  live `agent_runs` table currently holds **268 rows** (240 corpus + 20 forks
+  and a handful of ingest tests created while verifying this session's work).
+  The count grows every time a fork is created, so treat it as a reading, not
+  a constant.
 - **Headline:** top-1 localization is **95.0%** on trained classes and
   **52.5%** on held-out classes via the Hybrid Sentry Engine, against a
   last-step baseline of 7.5% and an LLM-as-judge baseline of 32.5%. The raw ML
@@ -38,7 +40,7 @@ quoting anything.
   (section 4.4).
 - **Not started:** nothing in the PRD feature table. Remaining work is
   polish and deploy.
-- **Tests: 166 collected, 166 pass.** `backend/test_backend.py` end-to-end
+- **Tests: 212 collected, 212 pass.** `backend/test_backend.py` end-to-end
   integration check also passes.
 - Python **3.13.7** in `.venv`. Node with Vite 8 / React 19 for the frontend.
 
@@ -335,7 +337,7 @@ stack, so this adds no new dependency.
 **Bundle.** `ModelBenchmarks` now imports Recharts, so it is lazy-loaded via
 `React.lazy` exactly as `InsightsView` already was. Both chart tabs share
 one 105 kB gzip Recharts chunk that the Runs tab never downloads; the main
-bundle stayed at 147.7 kB gzip and the Vite size warning did not return.
+bundle stayed at 147.7 kB gzip (149.7 kB after the engine selector) and the Vite size warning did not return.
 
 **One regression found and fixed while verifying.** `model/artifacts/
 evaluation.json` had lost its LLM-as-judge baseline — an earlier
@@ -344,6 +346,60 @@ overwritten the artifact, so the Model page rendered the most important
 baseline as a dash. Re-ran `python -m model.evaluate` with the judge cached.
 All four baselines are present again and every headline number is
 unchanged.
+
+### 4.5 Pluggable diagnosis engines (this session)
+
+`backend/engine_selector.py`, 404 lines, plus 46 tests. `POST
+/runs/{id}/diagnose` now takes an optional `X-Engine-Provider` header and
+routes diagnosis to the named engine. Nothing in `model/predict.py` or the
+existing diagnosis path changed: with no header and no `ENGINE_*` variables
+set, the endpoint sends the request it always did.
+
+**The local engine is the floor, not just the default.** Unconfigured, timed
+out, HTTP error, connection refused, malformed payload, unparseable JSON and
+a trace the prompt renderer cannot handle all fall back to local, and the
+request still returns 200. `X-Engine-Used` on the response names what actually
+ran, which is deliberately not always what was asked for.
+
+**Endpoint URLs resolve from server-side environment variables, never from
+the request.** The header picks a configured provider; it cannot supply a URL.
+A caller who could name the endpoint could make the server POST an internal
+trace anywhere, which is SSRF with the most valuable possible payload. There
+is a test asserting a URL passed as a provider name resolves to local rather
+than being dialled.
+
+**Groq is wired and works, and it is honestly worse.** It runs
+`model/judge.py`'s existing prompt, so the Groq provider *is* the LLM-as-judge
+baseline served by Groq instead of Gemini: 32.5% held-out against 52.5%.
+Verified live on run `02d93cf4` (ground truth `stale_retrieval`, step 8): the
+hybrid engine answered step 8 / `stale_retrieval` correctly, Groq answered
+step 10 / `premature_termination` with a fluent and wrong rationale. That
+contrast is worth demoing.
+
+Because an LLM returns a point estimate rather than a distribution, a Groq
+diagnosis carries `evidence: {}`, `shap: null`, `class_confidence: 0.0` and a
+single `step_scores` spike. Those are empty because no features were
+extracted; filling them would be fabricating evidence.
+
+**Two bugs the first real key exposed.** The default model
+`llama-3.3-70b-versatile` 404'd, because Groq model availability is per
+account and a 404 there means "your key cannot use this model"; the default is
+now `openai/gpt-oss-120b` and the docs say how to list what a key can reach.
+And `REMOTE_TIMEOUT_S` of 2s, correct for a webhook returning a precomputed
+answer, would have timed out every LLM call and made a working provider look
+broken, so Groq got its own `GROQ_TIMEOUT_S` defaulting to 20.
+
+**Keys are not persisted in the browser.** `GROQ_API_KEY` server-side is
+preferred and always wins over a per-request `X-Engine-Key`. The dashboard
+holds a typed key in a module variable so it survives navigating between tabs
+and is gone on reload, because localStorage is readable by anything reaching
+the origin.
+
+**Frontend.** `lib/engineProvider.ts` persists only the provider id under
+`bb_engine_provider` via `useSyncExternalStore`, `components/
+EngineProviderPanel.tsx` renders the Settings section and the clickable Step
+Inspector header badge, and `.card-title` in `index.css` gives every Settings
+card a bold accent heading with a text glow.
 
 ---
 
@@ -462,8 +518,8 @@ state, `GET /runs`:
 
 | Item | Value |
 | --- | --- |
-| Total rows | 251 (240 corpus + ~11 from pre-existing test fixtures and this session's live fork/OTel verification calls) |
-| By injected class | `schema_violation` 25, `stale_retrieval`/`hallucinated_argument`/`premature_termination`/`wrong_tool_chosen` 21 each, `context_truncation`/`infinite_loop` 20 each, 98 clean |
+| Total rows | 268 (240 corpus + 20 forks + test fixtures and live fork/OTel/engine verification calls). Grows with every fork |
+| By injected class | `schema_violation` 27, `stale_retrieval`/`hallucinated_argument`/`premature_termination`/`wrong_tool_chosen` 21 each, `context_truncation`/`infinite_loop` 20 each, 117 with no injected class (clean runs plus forks, which inherit no class) |
 | Diagnosed | All corpus rows, as part of seeding |
 
 Idempotent: re-running `backend.seed_corpus` inserts only rows not already
@@ -646,7 +702,7 @@ CLAUDE.md's dependency discipline.
 
 ### Tests
 
-**166 collected, 166 passing.**
+**212 collected, 212 passing.**
 
 | Package | Count |
 | --- | --- |
@@ -675,8 +731,10 @@ Key guards:
 
 ## 7. Changes made to PRD.md and CLAUDE.md
 
-- **Groq replaced by Gemini everywhere**, model `gemini-3.5-flash-lite`,
-  JSON-constrained, provider-swappable via env.
+- **Groq replaced by Gemini as the explainer**, model `gemini-3.5-flash-lite`,
+  JSON-constrained, provider-swappable via env. Groq later returned as an
+  *optional diagnosis engine* rather than the explainer (section 4.5); the two
+  roles are separate and Gemini is still the only explainer.
 - **Baselines went from 2 to 4**, adding the anomaly heuristic and the
   LLM-as-judge.
 - **"Two jobs, never blurred"**: the ML model picks the step, the LLM only
