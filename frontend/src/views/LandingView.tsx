@@ -37,7 +37,7 @@ export function LandingView({ onSignIn }: { onSignIn: () => void }) {
   };
 
   return (
-    <div className="relative bg-bg text-text">
+    <div className="relative text-text">
       <ScrollProgress />
 
       {/* hero */}

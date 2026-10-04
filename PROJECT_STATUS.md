@@ -23,7 +23,7 @@ quoting anything.
   and a model benchmarks view — all reading live data, nothing hardcoded.
 - **The 240-run synthetic corpus is seeded into the live Supabase database**
   (idempotent loader: `backend/seed_corpus.py`), diagnosed, and demo-ready. The
-  live `agent_runs` table currently holds **268 rows** (240 corpus + 20 forks
+  live `agent_runs` table currently holds **279 rows** (240 corpus + 22 forks
   and a handful of ingest tests created while verifying this session's work).
   The count grows every time a fork is created, so treat it as a reading, not
   a constant.
@@ -40,7 +40,7 @@ quoting anything.
   (section 4.4).
 - **Not started:** nothing in the PRD feature table. Remaining work is
   polish and deploy.
-- **Tests: 212 collected, 212 pass.** `backend/test_backend.py` end-to-end
+- **Tests: 224 collected, 224 pass.** `backend/test_backend.py` end-to-end
   integration check also passes.
 - Python **3.13.7** in `.venv`. Node with Vite 8 / React 19 for the frontend.
 
@@ -401,6 +401,56 @@ EngineProviderPanel.tsx` renders the Settings section and the clickable Step
 Inspector header badge, and `.card-title` in `index.css` gives every Settings
 card a bold accent heading with a text glow.
 
+### 4.6 Live demo endpoint, UI polish, ambient background (this session)
+
+**`POST /demo/run-live`** (`backend/demo_router.py`, mounted as a router so it
+adds nothing to existing paths). Builds a trace with a chosen fault injected,
+persists it, diagnoses it with the real engine, and returns the new run id plus
+`localized_correctly`, which is knowable because the fault was injected. Every
+step reuses an existing helper (`generator.build.build_run`,
+`seed_corpus.insert_run`, `seed_corpus.diagnose_run`). That is not tidiness: a
+separate generator path would draw from a different distribution and the
+model's scores on demo runs would silently stop meaning anything. 12 tests.
+
+Bad input returns 400 with the valid values rather than the 500 the brief
+asked for, because an unknown `agent_type` is the caller's mistake. Genuine
+failures return 500 JSON with the session rolled back, with a test asserting no
+half-written run survives.
+
+**Run live agent tile** on the Runs tab (`components/RunLiveAgentModal.tsx`),
+driving those endpoints. Its stage readout names what the backend actually
+does; an earlier draft said "Streaming OpenTelemetry Telemetry", which would
+have been false, since this path calls the synthetic generator and never
+touches OTel. The toast reports measured elapsed time and the real outcome,
+including when the engine misses.
+
+**Trace view gaps closed.** Diagnosis now runs automatically on mount when a
+run has none (previously a manual button, which made arriving at an unscored
+trace a dead end), the flagged step auto-selects once, and a ROOT CAUSE
+LOCATED banner carries step, confidence, class and `evidence_path`. The banner
+respects the contract: when `anomaly_signal` is set `predicted_class` is
+`"unknown"`, so it shows the signal rather than inventing a class.
+
+**Suspicion thresholds left at 10/40.** The brief asked for 30/70. Measured
+across 223 real step scores from 25 diagnosed runs the two are
+indistinguishable (amber 0.9% either way) because the distribution is bimodal:
+one step takes 60 to 99 and the rest sit near zero. Changing a shared module
+for no measurable gain was not worth it.
+
+**Ambient background** (`components/AmbientBackground.tsx`) wraps the existing
+`ui/ClosingPlasma` at 0.18 opacity rather than installing componentry's
+package, whose palette is navy and slate. Two non-obvious fixes were needed to
+make any such layer visible at all: three top-level wrappers each set a
+redundant opaque `bg-bg`, and `body` carried a background that paints *above*
+negative z-index children per CSS painting order. `html` now carries the page
+background alone, and `index.css` says why so it is not re-added.
+
+**Contract checker extended** to `backend/demo_router.py`, 23 pairs to 25.
+Doing so exposed a latent bug: `pythonFields` ended a class at the next
+`class`, so the last class in a file that also holds functions swallowed their
+parameters as fields. It never bit `models.py` because every class there has
+another after it.
+
 ---
 
 ## 5. Real numbers
@@ -518,7 +568,7 @@ state, `GET /runs`:
 
 | Item | Value |
 | --- | --- |
-| Total rows | 268 (240 corpus + 20 forks + test fixtures and live fork/OTel/engine verification calls). Grows with every fork |
+| Total rows | 279 (240 corpus + 22 forks + 17 from test fixtures and live fork/OTel/engine verification calls). Grows with every fork |
 | By injected class | `schema_violation` 27, `stale_retrieval`/`hallucinated_argument`/`premature_termination`/`wrong_tool_chosen` 21 each, `context_truncation`/`infinite_loop` 20 each, 117 with no injected class (clean runs plus forks, which inherit no class) |
 | Diagnosed | All corpus rows, as part of seeding |
 
@@ -702,7 +752,7 @@ CLAUDE.md's dependency discipline.
 
 ### Tests
 
-**212 collected, 212 passing.**
+**224 collected, 224 passing.**
 
 | Package | Count |
 | --- | --- |

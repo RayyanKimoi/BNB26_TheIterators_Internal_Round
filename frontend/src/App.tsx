@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useState } from 'react';
 
 import { AppShell, EmptyState, LoadingState } from './components/AppShell';
+import { AmbientBackground } from './components/AmbientBackground';
 import type { TabId } from './config/tabs';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/authCore';
@@ -99,6 +100,11 @@ function Root() {
 export default function App() {
   return (
     <AuthProvider>
+      {/* Decorative, fixed and pointer-events-none, so it sits outside every
+          screen rather than inside one. Mounted here so the plasma keeps a
+          continuous animation across landing, auth and the dashboard instead
+          of restarting on every navigation. */}
+      <AmbientBackground />
       <Root />
     </AuthProvider>
   );

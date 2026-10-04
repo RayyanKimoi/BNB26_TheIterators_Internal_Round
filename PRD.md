@@ -253,6 +253,20 @@ One row per step per diagnosis. This is what makes the heatmap show near-misses 
 | `/model/evaluation` | GET | Per-class accuracy, held-out results, baseline comparison |
 | `/dashboard/reliability` | GET | Aggregate pass rate, failure mix, latency, tokens, cost |
 | `/ingest/otel` | POST | Accept OpenTelemetry spans and map them into the trace schema |
+| `/settings` | GET | Read-only config status. Never returns secret values |
+| `/demo/run-live` | POST | Synthesize, persist and diagnose a fresh run in one call |
+| `/demo/options` | GET | Valid agent types and fault classes, read from the generator |
+
+**Built after this table was written.** The three rows above are additions, not
+part of the original spec, and `/runs/{id}/diagnose` grew two optional headers:
+`X-Engine-Provider` to route diagnosis to another engine and `X-Engine-Key` for
+a bring-your-own key. The local hybrid engine remains the default and the
+fallback for every failure path, so the endpoint behaves exactly as specified
+here when neither header is sent. Routing lives in `backend/engine_selector.py`
+and the response carries `X-Engine-Used` naming the engine that actually ran.
+Selecting the Groq provider runs the LLM-as-judge prompt, which scores 32.5% on
+held-out classes against the hybrid engine's 52.5%: it is a provider-flexibility
+feature and it makes localization worse, not better.
 
 **The diagnosis contract.** Every consumer reads this same object. Define it once as a Pydantic model and reuse it in the UI, the Slack alert and the regression-test generator.
 
@@ -335,7 +349,9 @@ No purple gradients. No emoji icons. No fake metrics, counters or testimonials. 
 4. The model. Real held-out numbers against the baseline. Never invented figures.
 5. Footer CTA with `closing-plasma`, which is what the component was built for.
 
-**App, six tabs in a left sidebar.**
+**App, six tabs.** *(Built as a top bar instead, at the product owner's
+request. The tab set and their order are unchanged, only the axis. See
+`frontend/src/components/TopNav.tsx`.)* Originally specified as a left sidebar:
 
 | Tab | Purpose | Key elements |
 | --- | --- | --- |

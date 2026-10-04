@@ -6,7 +6,7 @@
 ![Held-out accuracy](https://img.shields.io/badge/held--out_top--1-52.5%25-7DF9C4?style=flat-square)
 ![Best baseline](https://img.shields.io/badge/best_baseline_(LLM--judge)-32.5%25-8A8A92?style=flat-square)
 ![Detection rate](https://img.shields.io/badge/fault_detection-98.8%25-5BC98C?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-212_passing-5BC98C?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-224_passing-5BC98C?style=flat-square)
 ![Contracts](https://img.shields.io/badge/TS↔Pydantic_contracts-23%2F23-5BC98C?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.13.7-blue?style=flat-square)
 ![React](https://img.shields.io/badge/react-19.2.8-blue?style=flat-square)
@@ -95,9 +95,9 @@ Measured 2026-10-04 on the live system.
 | **Trained-class top-1** | **95.0%** | Correct step localized on the 5 fault classes present in training (n = 20 runs) |
 | **Held-out top-1, hybrid engine** | **52.5%** | Correct step on 2 fault classes **never seen in training** (n = 40 runs) |
 | **Held-out top-1, classifier alone** | **7.5%** | The supervised head by itself does **not** generalize. This is why the invariant tier exists |
-| **Fault detection rate** | **98.8%** | 159 of 161 failed runs carry a stored diagnosis |
+| **Fault detection rate** | **98.8%** | 168 of 170 failed runs carry a stored diagnosis |
 | **Trained-class top-3** | **100%** | The right step is always in the top 3 |
-| **Corpus** | **268 runs** | 161 failed, 107 successful, all 7 fault classes. Grows as forks are created |
+| **Corpus** | **279 runs** | 170 failed, 109 successful, all 7 fault classes. Grows as forks are created |
 | **LOCO mean** | **0.212** | Leave-one-class-out, flat across classes. Reported, not hidden |
 
 ### Baseline comparison — the number the pitch rests on
@@ -287,7 +287,7 @@ one you can trust when it does not.
 
 **1. Synthetic trace generator and seed corpus.** `generator/` produces realistic
 multi-step traces with faults injected deliberately, so ground truth is known.
-`backend/seed_corpus.py` is an idempotent loader. 268 runs live.
+`backend/seed_corpus.py` is an idempotent loader. 279 runs live.
 
 **2. Seven failure classes.**
 
@@ -348,10 +348,20 @@ confirmed fix into a permanent assertion.
 **18. OpenTelemetry ingest.** `POST /ingest/otel`.
 
 **— Reliability dashboard.** `GET /dashboard/reliability` with Recharts on Insights:
-pass rate over time, failure mix, latency, token trends. Live: 268 runs, 39.93% pass
-rate, 1,153,520 total tokens. **Cost is deliberately absent** — no token rate is
+pass rate over time, failure mix, latency, token trends. Live: 279 runs, 39.07% pass
+rate, 1,202,495 total tokens. **Cost is deliberately absent** — no token rate is
 configured, so `estimated_cost_usd` returns `null` and the UI omits the metric rather
 than fabricating one.
+
+**21. Live agent runs.** `backend/demo_router.py`. `POST /demo/run-live`
+builds a fresh trace with a chosen fault injected, persists it and scores it
+with the real engine in one call, so a demo never depends on a run seeded
+hours earlier. Driven from the Runs tab's "Run live agent" tile. It reuses
+`generator.build.build_run` and `seed_corpus.insert_run`/`diagnose_run`, which
+matters beyond tidiness: a separate generator path would draw from a different
+distribution and the model's scores on those runs would quietly mean nothing.
+The response reports `localized_correctly`, because the injected fault means
+ground truth is known.
 
 **20. Pluggable diagnosis engines.** `backend/engine_selector.py`. Routes
 diagnosis to Groq, a custom LLM, an enterprise webhook or an on-prem model via
@@ -391,12 +401,14 @@ and 29 source files honour `prefers-reduced-motion`.
 | `/dashboard/reliability` | GET | Pass rate, failure mix, latency, tokens |
 | `/ingest/otel` | POST | Accept OTel spans into the trace schema |
 | `/settings` | GET | Read-only config status. **Never returns secret values** |
+| `/demo/run-live` | POST | Synthesize, persist and diagnose a fresh run in one call |
+| `/demo/options` | GET | Valid agent types and fault classes, read from the generator |
 
 ### The diagnosis contract
 
 Defined once in `backend/models.py::DiagnosisResponse`, **13 fields**, mirrored by every
 consumer — the UI, the Slack alert and the regression-test generator. A build-time script
-(`frontend/scripts/check-contract.mjs`) validates **23 TypeScript interfaces** against
+(`frontend/scripts/check-contract.mjs`) validates **25 TypeScript interfaces** against
 the Pydantic models, so contract drift fails the build rather than reaching production.
 
 ```json
@@ -541,7 +553,7 @@ order are unchanged.)
 
 ### `/runs` — survey the damage
 
-All 268 runs in a high-density table: status, task type, injected class, tokens,
+All 279 runs in a high-density table: status, task type, injected class, tokens,
 duration, whether a diagnosis exists. A metrics header summarizes pass rate and failure
 mix; a filter bar narrows by status, class and source.
 
@@ -750,13 +762,13 @@ npm run dev
 ## 14. Verification
 
 ```bash
-# Full Python suite — 212 tests
+# Full Python suite — 224 tests
 .venv/Scripts/python.exe -m pytest -q
 
 # End-to-end integration check against a live DB
 .venv/Scripts/python.exe -m backend.test_backend
 
-# Frontend: type-check + lint + TS↔Pydantic contract sync (23/23)
+# Frontend: type-check + lint + TS↔Pydantic contract sync (25/25)
 cd frontend && npm run verify
 
 # Strict project build
@@ -770,7 +782,7 @@ Expected on a healthy tree:
 
 | Check | Expected |
 | --- | --- |
-| `pytest -q` | 212 passed |
+| `pytest -q` | 224 passed |
 | `backend.test_backend` | `TEST: PASSED` |
 | `npm run verify` | `contract check passed. DiagnosisResponse carries 13 keys.` |
 | `npx tsc -b` | no output |

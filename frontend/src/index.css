@@ -35,6 +35,15 @@
     border-color: var(--color-border);
   }
 
+  /*
+   * The page background lives on html alone, which paints it as the canvas
+   * below every other layer. body deliberately has none: a background on
+   * body paints in the normal block-background pass, which per CSS painting
+   * order comes AFTER negative z-index children, so an opaque body would sit
+   * on top of the ambient AmbientBackground layer and hide it completely.
+   * html still guarantees the dark background everywhere, including the
+   * overscroll area.
+   */
   html {
     background-color: var(--color-bg);
     color-scheme: dark;
@@ -42,7 +51,6 @@
 
   body {
     margin: 0;
-    background-color: var(--color-bg);
     color: var(--color-text);
     font-family: var(--font-sans);
     font-size: 14px;

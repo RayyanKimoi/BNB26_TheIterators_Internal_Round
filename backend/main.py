@@ -30,6 +30,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from backend.alerts import send_diagnosis_alert
+from backend.demo_router import router as demo_router
 from backend.engine_selector import run_selected_diagnosis_sync
 from backend.db import AgentRun, Diagnosis, RegressionTest, Step, StepScore
 from backend.engine import create_db_and_tables, get_session
@@ -75,6 +76,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Additive demo surface: builds, persists and diagnoses a fresh run in one
+# call. Mounted as a router so it adds no code to the paths above.
+app.include_router(demo_router)
 
 
 @app.on_event("startup")

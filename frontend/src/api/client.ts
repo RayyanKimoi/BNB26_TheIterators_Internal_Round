@@ -14,6 +14,9 @@
 import { engineHeaders } from '../lib/engineProvider';
 
 import type {
+  DemoOptions,
+  DemoRunRequest,
+  DemoRunResponse,
   CompareResponse,
   DiagnosisResponse,
   EvaluationResponse,
@@ -248,6 +251,26 @@ export const api = {
   /** GET /settings — which config is present. Never returns secret values. */
   getSettings(signal?: AbortSignal): Promise<SettingsResponse> {
     return request<SettingsResponse>('/settings', { signal });
+  },
+
+  /** GET /demo/options - valid agent types and glitches, from the generator. */
+  getDemoOptions(signal?: AbortSignal): Promise<DemoOptions> {
+    return request<DemoOptions>('/demo/options', { signal });
+  },
+
+  /**
+   * POST /demo/run-live - synthesizes, persists and diagnoses a fresh run.
+   *
+   * Uses the slow timeout: this builds a trace, writes it and runs the model
+   * in one request, so it is on the order of a diagnose call, not a list call.
+   */
+  runLiveDemo(body: DemoRunRequest, signal?: AbortSignal): Promise<DemoRunResponse> {
+    return request<DemoRunResponse>('/demo/run-live', {
+      method: 'POST',
+      body,
+      signal,
+      timeoutMs: SLOW_TIMEOUT_MS,
+    });
   },
 
   /** Cheap liveness probe for the header status dot. */

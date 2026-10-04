@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MODELS_PY = resolve(here, '../../backend/models.py');
+const DEMO_PY = resolve(here, '../../backend/demo_router.py');
 const TYPES_TS = resolve(here, '../src/types/api.ts');
 
 /**
@@ -55,15 +56,31 @@ const PAIRS = [
   ['SettingsResponse', 'SettingsResponse'],
 ];
 
+/**
+ * Same check, for models that live in a router rather than models.py. The
+ * demo endpoint's request and response are local to backend/demo_router.py
+ * precisely so they stay out of the shared diagnosis contract, but they are
+ * still a wire format the UI depends on, so they still get checked.
+ */
+const DEMO_PAIRS = [
+  ['DemoRunRequest', 'DemoRunRequest'],
+  ['DemoRunResponse', 'DemoRunResponse'],
+];
+
 /** Interfaces that extend another, whose inherited fields are declared there. */
 const INHERITS = { ExplanationResponse: 'ExplanationPayload' };
 
 function pythonFields(source, className) {
   const start = source.indexOf(`class ${className}(`);
-  if (start === -1) throw new Error(`class ${className} not found in models.py`);
+  if (start === -1) throw new Error(`class ${className} not found in the Python source`);
   const rest = source.slice(start);
-  const nextClass = rest.indexOf('\nclass ', 1);
-  const body = nextClass === -1 ? rest : rest.slice(0, nextClass);
+  // The class body ends at the next top-level statement, not just the next
+  // class. Scanning only for a following `class ` was fine while every model
+  // lived in models.py with another class after it, but the last class in a
+  // file that also holds functions would otherwise swallow their parameters
+  // as if they were fields.
+  const nextTop = rest.slice(1).search(/\n(?=[^\s#])/);
+  const body = nextTop === -1 ? rest : rest.slice(0, nextTop + 1);
   const fields = new Set();
   // `name: type = Field(...)` or `name: type` at one indent level.
   for (const match of body.matchAll(/^\s{4}([a-z_][a-z0-9_]*)\s*:/gim)) {
@@ -94,6 +111,7 @@ function tsFields(source, interfaceName) {
 }
 
 const py = readFileSync(MODELS_PY, 'utf8');
+const demoPy = readFileSync(DEMO_PY, 'utf8');
 const ts = readFileSync(TYPES_TS, 'utf8');
 
 let failures = 0;
@@ -131,6 +149,23 @@ for (const [pyName, tsName] of PAIRS) {
     console.error(`\n  ExplanationResponse missing in TypeScript: ${missing.join(', ')}`);
   } else {
     console.log(`  ok  ${'ExplanationResponse'.padEnd(22)} ${expected.size} fields`);
+  }
+}
+
+for (const [pyName, tsName] of DEMO_PAIRS) {
+  const expected = pythonFields(demoPy, pyName);
+  const actual = tsFields(ts, tsName);
+  const missing = [...expected].filter((f) => !actual.has(f));
+  const extra = [...actual].filter((f) => !expected.has(f));
+
+  if (missing.length || extra.length) {
+    failures++;
+    console.error(`
+  ${pyName} -> ${tsName}  (demo_router.py)`);
+    if (missing.length) console.error(`    missing in TypeScript: ${missing.join(', ')}`);
+    if (extra.length) console.error(`    not in Pydantic:        ${extra.join(', ')}`);
+  } else {
+    console.log(`  ok  ${tsName.padEnd(22)} ${expected.size} fields`);
   }
 }
 

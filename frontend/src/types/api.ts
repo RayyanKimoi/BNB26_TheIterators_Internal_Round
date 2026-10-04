@@ -384,3 +384,35 @@ export interface SettingsResponse {
   trained_classes: string[];
   held_out_classes: string[];
 }
+
+/* -------------------------------------------------------------------------
+ * Live demo (backend/demo_router.py)
+ *
+ * Defined in the router rather than backend/models.py so they stay out of the
+ * shared diagnosis contract, but scripts/check-contract.mjs still checks them
+ * against that file.
+ * ---------------------------------------------------------------------- */
+
+/** GET /demo/options. A plain dict server side, so not contract-checked. */
+export interface DemoOptions {
+  agent_types: string[];
+  glitches: string[];
+}
+
+export interface DemoRunRequest {
+  agent_type: string;
+  glitch: string | null;
+  seed?: number | null;
+}
+
+export interface DemoRunResponse {
+  status: string;
+  run_id: string;
+  task_type: string;
+  injected_class: string | null;
+  true_failure_step: number | null;
+  flagged_step_index: number | null;
+  predicted_class: string | null;
+  step_count: number;
+  localized_correctly: boolean | null;
+}

@@ -47,7 +47,7 @@ export function AuthView({ onBack }: { onBack: () => void }) {
   ];
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-bg px-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4">
       <ClosingPlasma className="pointer-events-none absolute inset-0 h-full w-full opacity-70" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-bg/40 via-bg/55 to-bg" />
 

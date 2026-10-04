@@ -46,6 +46,24 @@ original named signals (`token_collapse`, `state_repetition`), every other
 feature gets a generic two-sided training-percentile check, named
 `{feature}_low` / `{feature}_high` (e.g. `semantic_deviation_high`).
 
+## Engine selection and the demo endpoint
+`POST /runs/{id}/diagnose` takes an optional `X-Engine-Provider` header
+(`default` | `groq` | `custom_llm` | `webhook` | `air_gapped`) and an optional
+`X-Engine-Key`. Routing lives in `backend/engine_selector.py`. Three rules:
+- The local hybrid engine is the default AND the fallback for every failure.
+  Unconfigured, timeout, HTTP error, malformed payload all fall back, and the
+  request still returns 200. `X-Engine-Used` names what actually ran.
+- Remote endpoint URLs come from server-side env vars only, never from the
+  request. A caller-supplied URL would be SSRF with the trace as payload.
+- Groq runs `model/judge.py`'s prompt, so it IS the LLM-as-judge baseline:
+  32.5% held out vs the hybrid engine's 52.5%. It is a flexibility feature and
+  it makes localization worse. Never present it as an upgrade.
+
+`POST /demo/run-live` (`backend/demo_router.py`) synthesizes a run with an
+injected fault, persists it and diagnoses it in one call. It reuses
+`generator.build.build_run` and `seed_corpus.insert_run`/`diagnose_run` so demo
+runs come from the same distribution as the training corpus.
+
 ## Design tokens
 bg #0A0A0B · panel #111113 · border #1F1F23 · text #E8E8E8 · muted #8A8A92 · accent #7DF9C4 · warn #E8B14C · critical #E0574C · pass #5BC98C
 Fonts: Space Grotesk (headings/metrics), Geist (body), Geist Mono (all data/JSON/ids)
@@ -57,3 +75,9 @@ Fonts: Space Grotesk (headings/metrics), Geist (body), Geist Mono (all data/JSON
 - Report real numbers only. Never invent a metric
 - Honour prefers-reduced-motion
 - Don't add LangChain or heavy frameworks not called for in PRD.md
+- Check whether a component already exists before installing one. `ui/ClosingPlasma`,
+  `ui/AsciiImage` and the rest are already palette-locked and reduced-motion aware
+- `body` must have NO background-color: it paints above negative z-index children
+  and would hide `components/AmbientBackground`. `html` carries the page background
+- Never name a metric the API did not return. `confidence`, `class_confidence` and
+  `localized_correctly` are all real fields; invented timings and accuracies are not

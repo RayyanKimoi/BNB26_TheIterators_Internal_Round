@@ -187,7 +187,7 @@ export function AppShell({ activeTab, onTabChange, children }: AppShellProps) {
 
   return (
     <ToastContext.Provider value={toastApi}>
-      <div className="flex min-h-screen flex-col bg-bg text-text">
+      <div className="flex min-h-screen flex-col text-text">
         <TopNav
           activeTab={activeTab}
           onTabChange={onTabChange}

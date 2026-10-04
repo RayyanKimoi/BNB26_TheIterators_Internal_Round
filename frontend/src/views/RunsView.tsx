@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../api/client';
 import { ErrorState, EmptyState } from '../components/AppShell';
 import { FilterBar } from '../components/FilterBar';
+import { RunLiveAgentModal } from '../components/RunLiveAgentModal';
 import { MetricsHeader } from '../components/MetricsHeader';
 import { RunsTable } from '../components/RunsTable';
 import { CLEAN_CLASS, EMPTY_FILTERS } from '../config/runFilters';
@@ -50,6 +51,7 @@ export function RunsView({ onOpenTrace }: RunsViewProps) {
   const [reloadKey, setReloadKey] = useState(0);
 
   const [filters, setFilters] = useState<RunTableFilters>(EMPTY_FILTERS);
+  const [liveOpen, setLiveOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -155,16 +157,47 @@ export function RunsView({ onOpenTrace }: RunsViewProps) {
         loading={loading}
       />
 
-      <motion.div variants={item}>
-        <FilterBar
-          filters={filters}
-          onChange={setFilters}
-          taskTypes={taskTypes}
-          faultClasses={faultClasses}
-          hasClean={hasClean}
-          shown={filtered.length}
-          total={runs.length}
-        />
+      <motion.div variants={item} className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
+        <div className="min-w-0 flex-1">
+          <FilterBar
+            filters={filters}
+            onChange={setFilters}
+            taskTypes={taskTypes}
+            faultClasses={faultClasses}
+            hasClean={hasClean}
+            shown={filtered.length}
+            total={runs.length}
+          />
+        </div>
+        {/* Stretched to the filter panel's height so the two read as one
+            control row. Deliberately NOT aspect-square: the row is wide, so
+            forcing width to equal height made the tile taller than the panel
+            it sits beside and it overhung the row. A fixed width plus
+            items-stretch matches the neighbour exactly at any row height. */}
+        <button
+          type="button"
+          onClick={() => setLiveOpen(true)}
+          className="hairline glow-accent flex shrink-0 flex-row items-center justify-center gap-3 rounded bg-panel px-4 py-3 text-accent transition-colors hover:border-accent lg:w-52 lg:flex-col lg:gap-2 lg:px-5 lg:py-4"
+        >
+          {/* Stroked SVG rather than a lightning emoji: CLAUDE.md bans emoji
+              icons, and they render inconsistently across platforms anyway. */}
+          <svg
+            viewBox="0 0 24 24"
+            className="size-5 shrink-0 lg:size-7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            aria-hidden="true"
+          >
+            <path d="M13 2L4.5 13.5H11l-1 8.5 8.5-11.5H12l1-8.5z" strokeLinejoin="round" />
+          </svg>
+          <span className="flex flex-col items-start lg:items-center">
+            <span className="font-display text-[14px] font-bold leading-tight lg:text-[15px]">
+              Run live agent
+            </span>
+            <span className="data leading-tight text-muted">generate and diagnose</span>
+          </span>
+        </button>
       </motion.div>
 
       <motion.div variants={item}>
@@ -179,6 +212,12 @@ export function RunsView({ onOpenTrace }: RunsViewProps) {
           <RunsTable runs={filtered} loading={loading} onInspect={onInspect} />
         )}
       </motion.div>
+
+      <RunLiveAgentModal
+        open={liveOpen}
+        onClose={() => setLiveOpen(false)}
+        onCreated={onOpenTrace}
+      />
     </motion.div>
   );
 }

@@ -10,7 +10,7 @@
 
 import { motion, useReducedMotion } from 'framer-motion';
 import type { Variants } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { api } from '../api/client';
@@ -136,6 +136,33 @@ export function TraceView({ runId, onBack, onNavigateToRun }: TraceViewProps) {
 
     return () => controller.abort();
   }, [runId]);
+
+  // No diagnosis yet: score it without making the user ask. The manual
+  // button below stays for retries and for the case where this fails, but
+  // arriving at a trace and finding it unscored is a dead end, not a choice.
+  const autoDiagnosed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!run || run.diagnosis || diagnosing) return;
+    // Guard per runId: without it, the setRun this triggers re-runs the
+    // effect and fires a second diagnosis before the first lands.
+    if (autoDiagnosed.current === runId) return;
+    autoDiagnosed.current = runId;
+    void runDiagnosis();
+    // runDiagnosis is stable for a given runId and intentionally omitted:
+    // including it would re-run this on every render it is recreated on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, runId, diagnosing]);
+
+  // Open on the step the engine blamed. Only until the user picks another:
+  // once selectedIndex is set, this must never yank the selection back.
+  const autoSelected = useRef<string | null>(null);
+  useEffect(() => {
+    const flagged = run?.diagnosis?.flagged_step_index;
+    if (flagged === undefined || flagged === null) return;
+    if (autoSelected.current === runId) return;
+    autoSelected.current = runId;
+    setSelectedIndex(flagged);
+  }, [run?.diagnosis?.flagged_step_index, runId]);
 
   // This run is itself a fork: fetch its parent so the comparison view can
   // render without a fresh ForkResponse (there isn't one — nothing was just
@@ -331,6 +358,64 @@ export function TraceView({ runId, onBack, onNavigateToRun }: TraceViewProps) {
           </motion.div>
         ) : (
           <>
+            {/* The headline verdict. `confidence` is the flagged step's own
+                share of step_scores, and `anomaly_signal` being set means the
+                invariant tier fired rather than the classifier, in which case
+                predicted_class is "unknown" by contract and this must not
+                name a class it does not have. */}
+            <motion.div
+              variants={item}
+              className="hairline border-critical/50 bg-critical/5 p-4"
+              role="status"
+            >
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="flex items-center gap-2">
+                  <span
+                    className="block size-2 rounded-full bg-critical shadow-[0_0_8px_var(--color-critical)]"
+                    aria-hidden="true"
+                  />
+                  <span className="font-display text-[15px] font-bold tracking-tight text-critical">
+                    ROOT CAUSE LOCATED
+                  </span>
+                </span>
+
+                <span className="data rounded border border-critical/40 bg-critical/10 px-2 py-0.5 text-critical">
+                  step {diagnosis.flagged_step_index}
+                </span>
+
+                <span className="data rounded border border-border px-2 py-0.5 text-muted">
+                  confidence {Math.round((diagnosis.confidence ?? 0) * 100)}%
+                </span>
+
+                {diagnosis.predicted_class !== 'unknown' && (
+                  <span className="data rounded border border-warn/40 bg-warn/10 px-2 py-0.5 text-warn">
+                    {diagnosis.predicted_class}
+                    {diagnosis.class_confidence
+                      ? ` ${Math.round(diagnosis.class_confidence * 100)}%`
+                      : ''}
+                  </span>
+                )}
+
+                {diagnosis.anomaly_signal && (
+                  <span className="data rounded border border-accent/40 bg-accent/10 px-2 py-0.5 text-accent">
+                    {diagnosis.anomaly_signal}
+                  </span>
+                )}
+              </div>
+
+              {diagnosis.evidence_path && (
+                <p className="data mt-2 text-muted">
+                  evidence at <span className="text-text">{diagnosis.evidence_path}</span>
+                </p>
+              )}
+
+              {diagnosis.unknown_reason && (
+                <p className="data mt-2 leading-relaxed text-muted">
+                  {diagnosis.unknown_reason}
+                </p>
+              )}
+            </motion.div>
+
             <motion.div variants={item}>
               <TraceHeatmap
                 steps={run.steps}
