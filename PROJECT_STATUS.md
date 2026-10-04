@@ -31,10 +31,14 @@ quoting anything.
   model alone gets 7.5% on held-out and does **not** beat the baseline; the
   hybrid tier is what passes the gate. Unchanged since the zero-leakage fix —
   verified again after the class-agnostic invariant tier work below.
-- **Not started:** the dedicated Forks/Insights/Settings sidebar tabs (backend
-  for all three already exists and is live), multi-candidate ranked fork
-  execution.
-- **Tests: 159 collected, 159 pass.** `backend/test_backend.py` end-to-end
+- **All six PRD tabs are built** (Runs, Trace, Forks, Model, Insights,
+  Settings) with addressable URLs, including the `/trace/{run_id}` deep link
+  the Slack alert posts. They sit in a **top bar**, not the left sidebar
+  `PRD.md` specifies: a deliberate deviation at the product owner's request
+  (section 4.4).
+- **Not started:** nothing in the PRD feature table. Remaining work is
+  polish and deploy.
+- **Tests: 166 collected, 166 pass.** `backend/test_backend.py` end-to-end
   integration check also passes.
 - Python **3.13.7** in `.venv`. Node with Vite 8 / React 19 for the frontend.
 
@@ -97,16 +101,16 @@ optional — see sections 6 and 8.
 | 5 | Structured JSON diagnosis API | P0 | **Done, including field-level `evidence_path`** (was `null`, now a dynamic best-effort JSON path — see section 4.2) |
 | 6 | Blame heatmap timeline UI | P0 | **Done.** `TraceHeatmap.tsx` (horizontal, per-step score bars), `StepTimeline.tsx` (vertical, connected execution sequence) |
 | 7 | Fork with deterministic suffix replay | P0 | **Done.** `replay/engine.py`, `POST /runs/{id}/fork`, UI in `StepInspector.tsx`. See section 4.3 for the real, corpus-wide flip rate (the "15 of 18" figure below was a test-fixture sample, not the corpus) |
-| 8 | Trace comparison, original vs fork | P0 | **Backend and core UI done.** `TraceComparison.tsx` shows parent vs child with the target step highlighted, triggered automatically after a fork or when opening a run with a `parent_run_id`. `GET /runs/{id}/compare/{other_id}` additionally diffs **any two arbitrary runs**, not only a fork pair. PRD's fuller vision — a dedicated **Forks tab** with a lineage tree and an any-two picker — is not built; the comparison is reached inline, not from its own tab |
+| 8 | Trace comparison, original vs fork | P0 | **Done, including the Forks tab.** `views/ForksView.tsx` renders the parent-to-child lineage tree and a compare-any-two picker over `GET /runs/{id}/compare/{other_id}`. Also: `TraceComparison.tsx` shows parent vs child with the target step highlighted, triggered automatically after a fork or when opening a run with a `parent_run_id`. `GET /runs/{id}/compare/{other_id}` additionally diffs **any two arbitrary runs**, not only a fork pair. PRD's fuller vision — a dedicated **Forks tab** with a lineage tree and an any-two picker — is not built; the comparison is reached inline, not from its own tab |
 | 9 | Gemini plain-English root cause | P1 | Done. `backend/explainer.py`, `POST /runs/{id}/explain`, cached in `agent_runs.explanation`, UI in `StepInspector.tsx` |
 | 10 | Field-level `evidence_path` | P1 | **Done.** See section 4.2 |
 | 11 | Suggested-fix diff view | P1 | Partial. `proposed_fix` is shown as text in the inspector, and the fork comparison shows a real red-to-green status flip with the patched step highlighted. There is no structured side-by-side JSON diff of the exact patch applied |
 | 12 | LangGraph real-agent demo | P1 | **Done.** `ingest/langgraph_adapter.py`, tested against a real compiled `StateGraph` + `SqliteSaver` (langgraph was already in `requirements.txt`, no new dependency). Not wired to an HTTP endpoint — called directly, like `backend.seed_corpus` |
 | 13 | Slack or Discord alert | P1 | **Done.** `backend/alerts.py`, Slack Block Kit, fired non-blocking from `POST /runs/{id}/diagnose` whenever `predicted_class != "unknown"` |
-| 14 | Multiple fork candidates ranked | P2 | Not started. Deferred: would need Gemini's `ExplanationPayload` to return multiple candidates, which changes a contract CLAUDE.md documents as frozen (3 keys) |
+| 14 | Multiple fork candidates ranked | P2 | **Done.** Gemini returns up to 3 ranked candidate patches (`ExplanationPayload.fix_candidates`); "Fork All Candidates" in `StepInspector.tsx` forks them in parallel and marks which actually flipped. The 3-key explain contract is widened, not broken: `fix_candidates` defaults to `[]`, so a cached pre-candidate explanation still validates |
 | 15 | Diagnosis memory, similar past failures | P2 | **Done.** `GET /runs/{id}/similar`, cosine similarity over stored `feature_vector` |
-| 16 | Auto-generated regression test | P2 | **Done.** `POST /runs/{id}/regression-test`, persists into the `regression_tests` table |
-| 17 | Reliability dashboard | P2 | **Backend done,** `GET /dashboard/reliability` (pass rate, failure mix, daily trend, real latency z-scores, token totals). No `InsightsView` UI yet |
+| 16 | Auto-generated regression test | P2 | **Done.** `POST /runs/{id}/regression-test`, persists into the `regression_tests` table. "Save as Regression Test" appears in `StepInspector.tsx` on any candidate fork that flipped |
+| 17 | Reliability dashboard | P2 | **Done.** `GET /dashboard/reliability` plus `views/InsightsView.tsx`: pass-rate area chart, failure-mix pie, token bars, latency z-score line (Recharts, per PRD's tech stack), and diagnosis-memory matches |
 | 18 | OpenTelemetry ingest endpoint | P2 | **Done.** `POST /ingest/otel`, a documented simplified OTel-like shape (not full OTLP) |
 | - | `unknown` confidence handling | P0 folded in | Done |
 | - | 4 baselines incl. LLM-as-judge | P0 folded in | Done |
@@ -279,6 +283,67 @@ held-out classes specifically. The feature selection for the *first-tried*
 check still carries some knowledge of what was held out; only the
 *fallback* tier is genuinely feature-agnostic. Do not claim the invariant
 tier as a whole is entirely assumption-free.
+
+### 4.4 UI pass: top bar, landing polish, chart rework (this session)
+
+Presentation only. No scoring, contract or endpoint behaviour changed, and
+the headline numbers in section 5 were re-verified unchanged afterwards.
+
+**Navigation moved from a left sidebar to a top bar.** `PRD.md` line 332
+specifies a left sidebar; the product owner asked for a top bar. The tab set
+and their order are untouched, only the axis. `components/Sidebar.tsx` was
+deleted and replaced by `components/TopNav.tsx`, which also carries
+`public/logo.png` at the top left. `config/tabs.ts` stayed a plain data
+module: the SVG icon paths live in `TopNav.tsx`, keyed by tab id. Both files
+carry a docstring recording the deviation so it does not read as drift.
+
+**The landing-page cursor vignette, actually fixed.** Reported twice; the
+first attempt fixed the wrong thing. The real cause: the ripple redraw calls
+`clearRect`, which wipes a *square*, while the repaint loop skipped every
+cell outside the ripple radius (`if (dist > rad) continue`). That left the
+four corners of the cleared rect erased, and the erased square tracking the
+cursor is what read as a vignette. The fix repaints the full rect; outside
+the radius the displacement is simply zero, so those cells come back
+identical to the static render. `components/ui/AsciiImage.tsx`.
+
+**Persistent accent glow.** Two utilities in `index.css` under
+`@layer components`, `.glow-accent` and `.glow-accent-strong`, both built
+from `color-mix` over the accent token rather than a hard-coded green, so
+they follow the design tokens. Applied to the landing cards, the ASCII
+panel and the reduced-motion grid fallback.
+
+**Landing cards are square and larger.** `SpiralGallery.tsx`: 320/440px wide
+with `aspect-square`, stage height 440 -> 520px. The uniform silhouette is
+the point — the depth stack reads far more clearly when card height does not
+vary with how much copy each one holds.
+
+**New closing section**, `components/ui/ClosingNotes.tsx`, between the
+gallery and the footer quote. Four claim cards, each deliberately an
+*honest* claim rather than a marketing one: it localizes rather than
+detects, the classifier alone does not generalize (7.5%), the fallback tier
+is what carries the unseen cases (52.5%), and a fork is a replay rather than
+a rerun. Every number in it is read from the real evaluation artifact.
+
+**Model page charts reworked.** The flat hand-rolled `BaselineBar` list is
+gone, replaced in `views/ModelBenchmarks.tsx` by a Recharts horizontal
+grouped bar chart (trained vs held-out per baseline, the hybrid engine's own
+row highlighted, value labels via `LabelList`) with a `ReferenceLine` at the
+last-step held-out gate, plus a per-class radar chart comparing the raw
+classifier against the hybrid engine. Recharts is named in `PRD.md`'s tech
+stack, so this adds no new dependency.
+
+**Bundle.** `ModelBenchmarks` now imports Recharts, so it is lazy-loaded via
+`React.lazy` exactly as `InsightsView` already was. Both chart tabs share
+one 105 kB gzip Recharts chunk that the Runs tab never downloads; the main
+bundle stayed at 147.7 kB gzip and the Vite size warning did not return.
+
+**One regression found and fixed while verifying.** `model/artifacts/
+evaluation.json` had lost its LLM-as-judge baseline — an earlier
+`python -m model.evaluate --no-judge` run during the section 4.1 work had
+overwritten the artifact, so the Model page rendered the most important
+baseline as a dash. Re-ran `python -m model.evaluate` with the judge cached.
+All four baselines are present again and every headline number is
+unchanged.
 
 ---
 
@@ -557,18 +622,35 @@ CLAUDE.md's dependency discipline.
   colour banding), `types/api.ts` + `api/client.ts` (full typed contract,
   21 interfaces checked against `backend/models.py` by
   `scripts/check-contract.mjs`).
-- **Not built**: a left sidebar with all 6 PRD tabs (currently 2, top nav);
-  `ForksView.tsx` (lineage tree + any-two picker — the backend endpoint
-  exists); `InsightsView.tsx` (the reliability dashboard UI — the backend
-  endpoint exists); `SettingsView.tsx`.
+- **Navigation**: `components/TopNav.tsx` — the six PRD tabs in a sticky top
+  bar with the product logo at the top left (tabs drop to their own
+  horizontally scrolling row under `lg`), stroked SVG icons rather than
+  emoji, which CLAUDE.md bans. Replaced `components/Sidebar.tsx`, now
+  deleted; see section 4.4 for why the axis changed. `lib/router.ts` is a ~60-line path sync over
+  the History API: addressable tabs and a working `/trace/{run_id}` deep link
+  (what `backend/alerts.py` posts to Slack) without adding react-router,
+  which `PRD.md` never asks for.
+- **Forks**: `views/ForksView.tsx` — lineage tree built client side from the
+  run list's `parent_run_id` links, plus a compare-any-two picker over
+  `GET /runs/{id}/compare/{other_id}` rendering a changed-steps-only diff.
+- **Insights**: `views/InsightsView.tsx` — Recharts (named in PRD's tech
+  stack) over `GET /dashboard/reliability`. Lazy-loaded via `React.lazy`:
+  Recharts is ~116 kB gzipped on its own, so it ships as a separate chunk
+  fetched only when the Insights tab opens, keeping the main bundle at
+  ~148 kB.
+- **Settings**: `views/SettingsView.tsx` — reads `GET /settings`, which
+  reports which configuration is *present* and never its values. Deliberately
+  not an editable form: every setting is either a server-side secret or a
+  train-time decision, so it shows real state plus copyable `.env` and OTel
+  `curl` snippets instead of a Save button that could not work.
 
 ### Tests
 
-**159 collected, 159 passing.**
+**166 collected, 166 passing.**
 
 | Package | Count |
 | --- | --- |
-| `backend/` | 57 |
+| `backend/` | 64 |
 | `model/` | 59 |
 | `generator/` | 35 |
 | `ingest/` | 8 |
@@ -652,22 +734,23 @@ Key guards:
 
 ## 9. Next steps, in priority order
 
-1. **`ForksView.tsx`** — a dedicated sidebar tab: lineage tree over
-   `parent_run_id`, and an any-two-runs picker calling the already-live
-   `GET /runs/{id}/compare/{other_id}`.
-2. **`InsightsView.tsx`** — hand-rolled charts (no new dependency) over the
-   already-live `GET /dashboard/reliability`: pass rate over time, failure mix,
-   token trend, plus `GET /runs/{id}/similar` as a "seen this before" panel.
-3. **Sidebar restructure** to the PRD's 6 tabs (Runs, Trace, Forks, Model,
-   Insights, Settings) in a left sidebar, replacing the current 2-tab top nav.
-4. **`SettingsView.tsx`**, read-only status first (what's configured: Slack
-   webhook present/absent, which env vars are set) unless a real
-   settings-persistence endpoint is built alongside it.
-5. **Multiple ranked fork candidates** (PRD item 14) — deferred because it
-   needs `ExplanationPayload`'s 3-key schema to grow, which CLAUDE.md documents
-   as frozen; needs a deliberate, separate contract decision, not a quick add.
-6. Optional: wire `ingest/langgraph_adapter.py` to an HTTP endpoint (it is
-   currently called directly, like `seed_corpus`), the way `/ingest/otel` is.
+Every item in the PRD feature table is now built. What remains is polish and
+operational work, not features:
+
+1. **Deploy.** Nothing is hosted: the frontend runs on Vite's dev server and
+   the API on local uvicorn. Both need a real target before anyone outside
+   this machine can see them.
+2. **A settings-persistence layer**, if Settings should ever be editable
+   rather than read-only. Needs an authenticated write path — the current
+   auth is a local demo gate, not something to put a secrets form behind.
+3. **Wire `ingest/langgraph_adapter.py` to an HTTP endpoint** the way
+   `/ingest/otel` is. It is currently called directly, like `seed_corpus`.
+4. **Ruff cleanup** in `backend/` (about 36 inherited findings, mostly
+   `Optional[X]` style; the three `B008`s are the correct FastAPI idiom and
+   should stay).
+5. **Suggested-fix diff view** (PRD item 11) is still partial: candidates show
+   their patch JSON and the comparison shows a real red-to-green flip, but
+   there is no structured side-by-side diff of the exact patch applied.
 
 ---
 
@@ -684,7 +767,7 @@ Key guards:
 | `19fc39b` | Fork UI and Model Benchmarks view |
 | `d9e3e65` | Fork outcome-flip fixes |
 | `6caa713` | LangGraph adapter |
-| uncommitted (this session) | Class-agnostic invariant scanner (4.1), dynamic `evidence_path` (4.2), the real corpus-wide fork-flip measurement (4.3) replacing the stale "15/18" figure, 5 new backend endpoints (`compare`, `similar`, `regression-test`, `dashboard/reliability`, `ingest/otel`), `backend/alerts.py` Slack integration, `backend/seed_corpus.py` idempotent loader (240-run corpus now live in Supabase), removal of the dead `EvaluationResponse` Pydantic class, 23 new tests (136 -> 159), this document |
+| uncommitted (this session) | Class-agnostic invariant scanner (4.1), dynamic `evidence_path` (4.2), the real corpus-wide fork-flip measurement (4.3) replacing the stale "15/18" figure, 5 new backend endpoints (`compare`, `similar`, `regression-test`, `dashboard/reliability`, `ingest/otel`), `backend/alerts.py` Slack integration, `backend/seed_corpus.py` idempotent loader (240-run corpus now live in Supabase), removal of the dead `EvaluationResponse` Pydantic class, 23 new tests (136 -> 159), then the UI pass in section 4.4 (top bar replacing the sidebar, logo, ASCII vignette root-caused and fixed, persistent accent glow, square landing cards, `ClosingNotes`, Recharts rework of the Model page, judge baseline restored), this document |
 
 An emoji `print` added to `model/features.py` in an earlier session crashed
 training on Windows (`UnicodeEncodeError`, cp1252). It has been removed. Avoid

@@ -117,6 +117,27 @@
     font-size: 12px;
     letter-spacing: -0.01em;
   }
+
+  /*
+   * Persistent mint edge, for the landing page's panels. The dashboard keeps
+   * the accent reserved for interactive affordances, but the landing page is
+   * a showcase surface where the constant glow is the point. Pair it with
+   * `hairline`, which supplies the 1px border this recolours.
+   */
+  .glow-accent {
+    border-color: color-mix(in oklab, var(--color-accent) 34%, transparent);
+    box-shadow:
+      0 0 22px -10px var(--color-accent),
+      inset 0 0 18px -14px var(--color-accent);
+  }
+
+  /* Same idea, stronger, for the one or two panels that should lead the eye. */
+  .glow-accent-strong {
+    border-color: color-mix(in oklab, var(--color-accent) 55%, transparent);
+    box-shadow:
+      0 0 34px -10px var(--color-accent),
+      inset 0 0 22px -14px var(--color-accent);
+  }
 }
 
 /*

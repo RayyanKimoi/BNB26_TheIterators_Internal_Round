@@ -219,6 +219,14 @@ class ExplanationPayload(BaseModel):
         default_factory=list,
         description="Key JSON attributes and values that triggered the failure",
     )
+    # PRD item 14: "Gemini proposes 2 to 3 fixes, fork all, show which passes."
+    # Defaults to empty so an explainer (or a cached explanation) that only
+    # returns the original three keys still validates — the three-key contract
+    # is widened here, never broken.
+    fix_candidates: list[SuggestedFix] = Field(
+        default_factory=list,
+        description="Up to 3 ranked candidate patches, each forkable on its own",
+    )
     proposed_fix: str = Field(
         "", description="Code diff or modified JSON payload that resolves the issue"
     )
@@ -415,3 +423,25 @@ class OtelIngestResponse(BaseModel):
     source: str = "otel"
     steps_created: int
     status: str
+
+
+class SettingsResponse(BaseModel):
+    """GET /settings: which configuration is present, never its values.
+
+    Deliberately reports booleans for every secret. A dashboard that echoed
+    `SLACK_WEBHOOK_URL` or `GEMINI_API_KEY` back to the browser would put
+    server credentials in client memory, the browser cache and any screen
+    recording of a demo, for no benefit over "configured: yes".
+    """
+
+    gemini_configured: bool
+    gemini_model: str
+    slack_configured: bool
+    token_cost_configured: bool
+    dashboard_base_url: str
+    database_dialect: str = Field(
+        ..., description="e.g. 'postgresql' or 'sqlite'. Never the full URL: it holds the password"
+    )
+    model_artifact_present: bool
+    trained_classes: list[str]
+    held_out_classes: list[str]

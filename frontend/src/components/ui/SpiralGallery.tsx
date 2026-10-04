@@ -45,7 +45,7 @@ const ITEMS: SpiralItem[] = [
 
 function AsciiPanel({ className = '' }: { className?: string }) {
   return (
-    <div className={`hairline relative overflow-hidden bg-bg ${className}`}>
+    <div className={`hairline glow-accent relative overflow-hidden bg-bg ${className}`}>
       <AsciiImage
         src="/statue.jpg"
         fontSize={8}
@@ -84,11 +84,20 @@ function SpiralCard({
   const zIndex = useTransform(active, (a) => Math.round(100 - Math.abs(index - a) * 10));
 
   return (
-    <motion.div style={{ rotateY, z, x, opacity, zIndex }} className="absolute w-[300px] sm:w-[400px]">
-      <div className="hairline bg-panel/90 p-6 backdrop-blur">
+    <motion.div
+      style={{ rotateY, z, x, opacity, zIndex }}
+      className="absolute w-[320px] sm:w-[440px]"
+    >
+      {/* Square by design: the depth stack reads much more clearly when every
+          card has the same silhouette regardless of how much copy it holds. */}
+      <div className="hairline glow-accent flex aspect-square flex-col bg-panel/90 p-7 backdrop-blur">
         <span className="data text-[13px] text-accent">{item.tag}</span>
-        <h3 className="mt-3 font-display text-2xl text-text">{item.title}</h3>
-        <p className="mt-3 text-[15px] leading-relaxed text-muted">{item.body}</p>
+        <h3 className="mt-4 font-display text-[26px] leading-tight text-text">{item.title}</h3>
+        <p className="mt-4 text-[15px] leading-relaxed text-muted">{item.body}</p>
+        <span className="mt-auto flex items-center gap-2 pt-6">
+          <span className="h-px flex-1 bg-accent/30" />
+          <span className="data text-accent/70">black box</span>
+        </span>
       </div>
     </motion.div>
   );
@@ -110,7 +119,7 @@ export function SpiralGallery() {
           <AsciiPanel className="h-[460px]" />
           <div className="grid gap-4 sm:grid-cols-2">
             {ITEMS.map((item) => (
-              <div key={item.tag} className="hairline bg-panel p-6">
+              <div key={item.tag} className="hairline glow-accent flex aspect-square flex-col bg-panel p-6">
                 <span className="data text-accent">{item.tag}</span>
                 <h3 className="mt-3 font-display text-xl text-text">{item.title}</h3>
                 <p className="mt-2 text-[14px] leading-relaxed text-muted">{item.body}</p>
@@ -128,7 +137,7 @@ export function SpiralGallery() {
         <div className="mx-auto grid w-full max-w-[1280px] items-center gap-8 px-4 sm:px-6 lg:grid-cols-[0.9fr_1.1fr]">
           <AsciiPanel className="h-[42vh] max-h-[360px] lg:h-[68vh] lg:max-h-[600px]" />
 
-          <div className="relative flex h-[440px] items-center justify-center" style={{ perspective: 1300 }}>
+          <div className="relative flex h-[520px] items-center justify-center" style={{ perspective: 1300 }}>
             <span className="data absolute -top-2 left-0 text-muted">
               Platform / scroll to explore
             </span>

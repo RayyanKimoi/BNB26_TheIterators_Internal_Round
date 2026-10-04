@@ -50,6 +50,7 @@ from backend.models import (
     ReliabilityTrendPoint,
     RunDetail,
     RunSummary,
+    SettingsResponse,
     SimilarRun,
     SimilarRunsResponse,
     StepDetail,
@@ -446,6 +447,7 @@ def diagnose_run(run_id: str, session: Session = Depends(get_session)):
             flagged_step_index=raw_diagnosis["flagged_step_index"],
             predicted_class=raw_diagnosis["predicted_class"],
             evidence=raw_diagnosis.get("evidence"),
+            confidence=raw_diagnosis.get("confidence"),
         )
     except Exception:  # noqa: BLE001 - an alert must never fail the request
         pass
@@ -978,3 +980,33 @@ def ingest_otel(body: OtelIngestRequest, session: Session = Depends(get_session)
     session.commit()
 
     return OtelIngestResponse(run_id=run.id, steps_created=len(ordered), status=run.status)
+
+
+# ---------------------------------------------------------------------------
+# GET /settings — which configuration is present, never its values
+# ---------------------------------------------------------------------------
+
+
+@app.get("/settings", response_model=SettingsResponse)
+def get_settings():
+    """Report what is configured so the Settings tab shows real state.
+
+    Only booleans for anything secret. See SettingsResponse for why.
+    """
+    from backend.engine import DATABASE_URL
+    from model.dataset import TRAIN_CLASSES
+    from generator.schema import HELD_OUT_CLASSES
+
+    artifact = Path(os.environ.get("MODEL_PATH", "model/artifacts/localizer.joblib"))
+
+    return SettingsResponse(
+        gemini_configured=bool(os.environ.get("GEMINI_API_KEY")),
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+        slack_configured=bool(os.environ.get("SLACK_WEBHOOK_URL")),
+        token_cost_configured=bool(os.environ.get("TOKEN_COST_PER_1K_USD")),
+        dashboard_base_url=os.environ.get("DASHBOARD_BASE_URL", "http://localhost:5173"),
+        database_dialect=DATABASE_URL.split(":", 1)[0].split("+", 1)[0],
+        model_artifact_present=artifact.exists(),
+        trained_classes=list(TRAIN_CLASSES),
+        held_out_classes=list(HELD_OUT_CLASSES),
+    )

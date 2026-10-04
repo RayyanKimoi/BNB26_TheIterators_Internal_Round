@@ -38,7 +38,7 @@ export function TraceStatusCard() {
   const durationMs = 120 + fillCount * 164;
 
   return (
-    <div className="hairline w-full max-w-lg bg-panel/85 p-5 backdrop-blur">
+    <div className="hairline glow-accent-strong w-full max-w-lg bg-panel/85 p-5 backdrop-blur">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="data rounded border border-border px-1.5 py-0.5 text-muted">SIMULATED</span>

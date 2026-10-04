@@ -28,11 +28,11 @@ Source of truth is `backend/models.py::DiagnosisResponse`. Mirror it, never fork
   "flagged_step_index": 14,
   "confidence": 0.87,                  // flagged step's share of step_scores, 0-1
   "predicted_class": "stale_retrieval", // one of the 7 classes, or "unknown"
-  "evidence_path": "step[14].output.currency",  // P1, null for now
+  "evidence_path": "step[14].output.currency",  // best-effort JSON path, real
   "evidence": {"semantic_deviation": 0.71, "duration_z": 2.4, "arg_novelty": 0.0},
-  "shap": {"semantic_deviation": 0.31, "arg_novelty": 0.24, "duration_z": 0.12},  // P1, null for now
+  "shap": {"semantic_deviation": 0.31, "arg_novelty": 0.24, "duration_z": 0.12},  // TreeExplainer, real
   "step_scores": [2, 4, 1, 88, 11],    // one per step, 0-100, sums to ~100
-  "explanation": "...",                // P1 Gemini, null for now
+  "explanation": "...",                // Gemini, null until /explain is called
   "suggested_fixes": [{"rank": 1, "patch": {}, "rationale": "..."}],  // P1 Gemini
   "class_confidence": 0.92,            // class head probability, 0.0 when unknown
   "unknown_reason": null,              // why no class was named, null when named

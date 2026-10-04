@@ -52,6 +52,7 @@ const PAIRS = [
   ['OtelSpan', 'OtelSpan'],
   ['OtelIngestRequest', 'OtelIngestRequest'],
   ['OtelIngestResponse', 'OtelIngestResponse'],
+  ['SettingsResponse', 'SettingsResponse'],
 ];
 
 /** Interfaces that extend another, whose inherited fields are declared there. */

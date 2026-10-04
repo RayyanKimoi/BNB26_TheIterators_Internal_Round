@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { API_BASE_URL, api } from '../api/client';
+import { TopNav } from './TopNav';
 import { TABS } from '../config/tabs';
 import type { TabId } from '../config/tabs';
 import { useAuth } from '../context/authCore';
@@ -187,65 +188,28 @@ export function AppShell({ activeTab, onTabChange, children }: AppShellProps) {
   return (
     <ToastContext.Provider value={toastApi}>
       <div className="flex min-h-screen flex-col bg-bg text-text">
-        <header className="sticky top-0 z-40 border-b border-border bg-bg/95 backdrop-blur">
-          <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center gap-4 px-4 sm:px-6">
-            <div className="flex items-center gap-3">
-              <span
-                className="dot-matrix hairline block size-6 shrink-0"
-                aria-hidden="true"
-              />
-              <div className="leading-tight">
-                <h1 className="font-display text-[15px] text-text">Black Box</h1>
-                <p className="data hidden text-muted md:block">
-                  Agent Trace Detector &amp; Fork Replay
-                </p>
-              </div>
-            </div>
-
-            <nav className="ml-2 flex items-center gap-1" aria-label="Primary">
-              {TABS.map((tab) => {
-                const isActive = tab.id === activeTab;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => onTabChange(tab.id)}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={`relative px-3 py-1.5 text-[13px] transition-colors ${
-                      isActive ? 'text-text' : 'text-muted hover:text-text'
-                    }`}
-                  >
-                    {tab.label}
-                    {isActive && (
-                      <motion.span
-                        layoutId="tab-underline"
-                        className="absolute inset-x-2 -bottom-[11px] h-px bg-accent"
-                        transition={{ duration: 0.24, ease: 'easeOut' }}
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </nav>
-
-            <div className="ml-auto flex items-center gap-3 sm:gap-4">
+        <TopNav
+          activeTab={activeTab}
+          onTabChange={onTabChange}
+          trailing={
+            <>
               <StatusIndicator health={health} />
               <span className="hidden h-5 w-px bg-border sm:block" aria-hidden="true" />
               <UserPill />
-            </div>
-          </div>
-        </header>
+            </>
+          }
+        />
 
-        <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6">
+        <main className="w-full flex-1 px-4 py-6 sm:px-6">
           <div className="mb-5">
-            <h2 className="font-display text-lg text-text">{active.label}</h2>
+            <h1 className="font-display text-lg text-text">{active.label}</h1>
             <p className="text-[13px] text-muted">{active.blurb}</p>
           </div>
           {children}
         </main>
 
         <footer className="border-t border-border">
-          <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between px-4 py-3 sm:px-6">
+          <div className="flex w-full items-center justify-between px-4 py-3 sm:px-6">
             <span className="data text-muted">Sentry for AI Agents</span>
             <span className="data text-muted">
               Numbers on the Model tab are measured, never estimated

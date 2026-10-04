@@ -1,6 +1,19 @@
-/** Navigation config. Separate from the shell so adding a tab touches one file. */
+/**
+ * Navigation config: the six tabs from PRD.md's dashboard spec.
+ *
+ * PRD.md places them in a left sidebar; the product owner asked for a top
+ * bar instead, so `components/TopNav.tsx` renders them horizontally. The tab
+ * set and order are unchanged.
+ *
+ * Separate from the shell so adding a tab touches one file, and icon-free so
+ * this stays a plain data module (the SVG paths live in TopNav.tsx, keyed by
+ * id). CLAUDE.md bans emoji icons, so those are stroked SVG paths rather than
+ * the emoji glyphs a nav like this often uses.
+ */
 
-export type TabId = 'runs' | 'model';
+export type TabId = 'runs' | 'trace' | 'forks' | 'model' | 'insights' | 'settings';
+
+export const TAB_IDS = ['runs', 'trace', 'forks', 'model', 'insights', 'settings'] as const;
 
 export interface Tab {
   id: TabId;
@@ -9,13 +22,11 @@ export interface Tab {
   blurb: string;
 }
 
-/**
- * The PRD specifies six tabs in a left sidebar: Runs, Trace, Forks, Model,
- * Insights, Settings. This build starts with the two that have screens behind
- * them, in a top bar. Trace and Forks are reached from inside Runs rather
- * than as peers, which keeps the navigation honest about what exists.
- */
 export const TABS: Tab[] = [
-  { id: 'runs', label: 'Runs & Traces', blurb: 'Every run, scored step by step' },
-  { id: 'model', label: 'Model Benchmarks', blurb: 'Held-out accuracy against four baselines' },
+  { id: 'runs', label: 'Runs', blurb: 'Every run, scored step by step' },
+  { id: 'trace', label: 'Trace', blurb: 'Per-step blame heatmap and the step inspector' },
+  { id: 'forks', label: 'Forks', blurb: 'Fork lineage and side-by-side run comparison' },
+  { id: 'model', label: 'Model', blurb: 'Held-out accuracy against four baselines' },
+  { id: 'insights', label: 'Insights', blurb: 'Reliability, failure mix and token trends' },
+  { id: 'settings', label: 'Settings', blurb: 'Webhooks, ingestion and model configuration' },
 ];

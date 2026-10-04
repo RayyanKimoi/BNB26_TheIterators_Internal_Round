@@ -202,7 +202,7 @@ export function FeatureDeepDive() {
             initial="hidden"
             whileInView="show"
             viewport={{ once: true, amount: 0.3 }}
-            className="hairline bg-panel/70 p-5 backdrop-blur transition-[border-color,box-shadow] duration-200 hover:border-accent/40 hover:shadow-[0_0_34px_-14px_var(--color-accent)]"
+            className="hairline glow-accent bg-panel/70 p-5 backdrop-blur transition-[border-color,box-shadow] duration-200 hover:border-accent/70 hover:shadow-[0_0_40px_-10px_var(--color-accent)]"
           >
             <div className="flex items-baseline gap-3">
               <span className="data text-accent">{item.index}</span>

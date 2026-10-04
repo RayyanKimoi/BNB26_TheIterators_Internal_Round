@@ -215,6 +215,12 @@ export function AsciiImage({
       ctx.textBaseline = 'top';
       ctx.textAlign = 'left';
 
+      // EVERY cell in the cleared rect is repainted, including the corners
+      // outside the ripple's radius. Skipping those (an earlier version did)
+      // left them erased, which is what read as a dark square frame tracking
+      // the cursor: the clear is a rectangle, so the repaint has to be one
+      // too. Outside the radius the displacement is simply zero, so those
+      // cells come back identical to the static render.
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
           const px = c * charW;
@@ -222,18 +228,30 @@ export function AsciiImage({
           const dx = px - mouse.x;
           const dy = py - mouse.y;
           const dist = Math.hypot(dx, dy);
-          if (dist > rad) continue;
-          const fall = 1 - dist / rad;
-          const amp = fall * fall * flowStrength * Math.sin(dist * flowFrequency - t * 3);
-          const ux = dx / (dist || 1);
-          const uy = dy / (dist || 1);
-          // Sample the already-dithered grid from a displaced position, so the
-          // speckle texture flows with the cursor instead of being erased.
-          const idx = sampleDitherIdx((px + ux * amp) / charW, (py + uy * amp) / charH);
+          const inside = dist <= rad;
+
+          let idx: number;
+          let fall = 0;
+          if (inside) {
+            fall = 1 - dist / rad;
+            const amp = fall * fall * flowStrength * Math.sin(dist * flowFrequency - t * 3);
+            const ux = dx / (dist || 1);
+            const uy = dy / (dist || 1);
+            // Sample the already-dithered grid from a displaced position, so
+            // the speckle texture flows with the cursor instead of vanishing.
+            idx = sampleDitherIdx((px + ux * amp) / charW, (py + uy * amp) / charH);
+          } else {
+            idx = sampleDitherIdx(c, r);
+          }
+
           const char = chars[idx];
           if (char === ' ') continue;
           const level = idx / (levels - 1);
-          const g = Math.min(255, Math.round(90 + level * 150 + fall * 40));
+          // Outside the radius this is exactly the static render's shade, so
+          // the boundary is invisible; inside, the lift scales with falloff.
+          const g = inside
+            ? Math.min(255, Math.round(90 + level * 150 + fall * 40))
+            : Math.round(58 + level * 190);
           ctx.fillStyle = `rgb(${g}, ${g}, ${Math.min(255, Math.round(g * 1.04))})`;
           ctx.fillText(char, px, py);
         }

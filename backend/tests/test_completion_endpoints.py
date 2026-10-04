@@ -313,3 +313,91 @@ def test_alert_never_raises_on_an_unreachable_webhook(monkeypatch):
         predicted_class="stale_retrieval", evidence={"duration_z": 1.2},
     )
     assert sent is False  # failed, but did not raise
+
+
+def test_slack_payload_carries_confidence_and_no_emoji():
+    payload = alerts.build_slack_payload(
+        run_id="abc", task_type="travel_booking", flagged_step_index=2,
+        predicted_class="schema_violation", evidence_summary="parse_failure=True",
+        confidence=0.9168,
+    )
+    blob = str(payload)
+    assert "92%" in blob, "confidence is rendered as a percentage"
+    # CLAUDE.md bans emoji icons project-wide, alerts included.
+    assert not any(ord(ch) > 0x2100 for ch in blob), "no emoji in the alert payload"
+
+
+# -- multi-candidate fixes (PRD item 14) --------------------------------------
+
+
+def test_candidate_patches_are_parsed_from_json_strings():
+    from backend.explainer import _parse_candidates
+
+    parsed = _parse_candidates(
+        [
+            {"rank": 2, "patch_json": '{"currency": "EUR"}', "rationale": "second"},
+            {"rank": 1, "patch_json": '{"ticket_id": 4821}', "rationale": "first"},
+        ]
+    )
+    assert [c["rank"] for c in parsed] == [1, 2], "candidates come back rank-sorted"
+    assert parsed[0]["patch"] == {"ticket_id": 4821}
+
+
+def test_malformed_candidate_is_dropped_not_fatal():
+    from backend.explainer import _parse_candidates
+
+    parsed = _parse_candidates(
+        [
+            {"rank": 1, "patch_json": "not json at all", "rationale": "bad"},
+            {"rank": 2, "patch_json": "[1, 2, 3]", "rationale": "not an object"},
+            {"rank": 3, "patch_json": '{"ok": true}', "rationale": "good"},
+        ]
+    )
+    assert len(parsed) == 1, "only the well-formed object candidate survives"
+    assert parsed[0]["patch"] == {"ok": True}
+
+
+def test_candidates_are_capped_at_three():
+    from backend.explainer import _parse_candidates
+
+    parsed = _parse_candidates(
+        [{"rank": i, "patch_json": f'{{"k": {i}}}', "rationale": ""} for i in range(1, 7)]
+    )
+    assert len(parsed) == 3
+
+
+# -- GET /settings -------------------------------------------------------------
+
+
+def test_settings_reports_presence_never_secret_values(client, monkeypatch):
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.test/super-secret-path")
+    monkeypatch.setenv("GEMINI_API_KEY", "sk-do-not-leak-me")
+    r = client.get("/settings")
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["slack_configured"] is True
+    assert body["gemini_configured"] is True
+    blob = r.text
+    assert "super-secret-path" not in blob, "the webhook URL must never reach the browser"
+    assert "sk-do-not-leak-me" not in blob, "the API key must never reach the browser"
+    # The dialect is safe to show; the full URL holds the password.
+    assert "://" not in body["database_dialect"]
+
+
+def test_settings_reports_the_class_split(client):
+    body = client.get("/settings").json()
+    assert set(body["held_out_classes"]) == {"infinite_loop", "context_truncation"}
+    assert "stale_retrieval" in body["trained_classes"]
+    assert not set(body["trained_classes"]) & set(body["held_out_classes"])
+
+
+def test_explanation_payload_still_validates_without_candidates():
+    """The original three-key response must keep working: the contract is
+    widened by fix_candidates, never broken by it."""
+    from backend.models import ExplanationPayload
+
+    payload = ExplanationPayload.model_validate(
+        {"root_cause": "x", "evidence_summary": ["y"], "proposed_fix": "z"}
+    )
+    assert payload.fix_candidates == []

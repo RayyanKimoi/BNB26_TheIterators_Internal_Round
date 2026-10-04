@@ -17,6 +17,10 @@
     "anomaly heuristic": {
       "seen": 0.3,
       "heldout": 0.0
+    },
+    "LLM-as-judge (Gemini)": {
+      "seen": 0.8,
+      "heldout": 0.325
     }
   },
   "loco_mean": 0.2123809523809524,

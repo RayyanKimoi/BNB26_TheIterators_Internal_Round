@@ -37,8 +37,35 @@ RESPONSE_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "A code diff or modified JSON payload that resolves it",
         },
+        # PRD item 14. `patch_json` is a STRING holding a JSON object literal
+        # rather than a nested object: Gemini's structured output wants every
+        # object's properties declared up front, and a patch's keys are
+        # whatever that step's payload happens to use. A string sidesteps that
+        # and is parsed (and rejected if malformed) in `_parse_candidates`.
+        "fix_candidates": {
+            "type": "array",
+            "description": "2 to 3 distinct candidate fixes, best first",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "rank": {"type": "integer", "description": "1 is the best candidate"},
+                    "patch_json": {
+                        "type": "string",
+                        "description": (
+                            "A JSON object literal merged into the flagged step's "
+                            'output, e.g. {"currency": "EUR"}'
+                        ),
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": "Why this candidate resolves the root cause",
+                    },
+                },
+                "required": ["rank", "patch_json", "rationale"],
+            },
+        },
     },
-    "required": ["root_cause", "evidence_summary", "proposed_fix"],
+    "required": ["root_cause", "evidence_summary", "proposed_fix", "fix_candidates"],
 }
 
 PROMPT = """\
@@ -65,8 +92,15 @@ Surrounding trace for context:
 
 Write the root cause in plain English, naming concrete values from the step. \
 List the specific JSON attributes and values that justify the call. Then give \
-a proposed fix as either a unified diff or a corrected JSON payload. Be \
-concrete and brief. Do not invent values that do not appear above.\
+a proposed fix as either a unified diff or a corrected JSON payload.
+
+Also give 2 to 3 DISTINCT candidate fixes in `fix_candidates`, ranked best \
+first. Each `patch_json` must be a JSON object literal that will be merged \
+into the flagged step's output to correct it, using only values that appear \
+in the evidence or surrounding trace above. Make the candidates genuinely \
+different approaches, not restatements of one another.
+
+Be concrete and brief. Do not invent values that do not appear above.\
 """
 
 
@@ -117,6 +151,52 @@ class GeminiExplainer:
 def _trim(value: Any, limit: int = 1200) -> str:
     text = json.dumps(value, indent=2, default=str)
     return text if len(text) <= limit else text[:limit] + "\n  ... truncated"
+
+
+def _parse_candidates(raw: Any) -> list[dict[str, Any]]:
+    """Turn the model's `fix_candidates` into SuggestedFix-shaped dicts.
+
+    Each candidate's `patch_json` is a string holding a JSON object (see
+    RESPONSE_SCHEMA). A candidate whose patch will not parse, or does not
+    parse to an object, is dropped rather than failing the whole explanation:
+    losing one of three optional candidates is a far better outcome than
+    losing the root cause the user actually asked for. Capped at 3 to match
+    the PRD.
+    """
+    if not isinstance(raw, list):
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        patch_raw = item.get("patch_json")
+        if isinstance(patch_raw, dict):
+            patch = patch_raw  # already an object; accept it
+        elif isinstance(patch_raw, str):
+            try:
+                parsed = json.loads(patch_raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            patch = parsed
+        else:
+            continue
+        if not patch:
+            continue
+
+        rank = item.get("rank")
+        candidates.append(
+            {
+                "rank": int(rank) if isinstance(rank, (int, float)) else index + 1,
+                "patch": patch,
+                "rationale": str(item.get("rationale") or ""),
+            }
+        )
+
+    candidates.sort(key=lambda c: c["rank"])
+    return candidates[:3]
 
 
 def build_prompt(
@@ -186,6 +266,8 @@ def explain(
         context_steps=context_steps,
     )
     raw = client.generate(prompt)
+    if isinstance(raw, dict) and "fix_candidates" in raw:
+        raw = {**raw, "fix_candidates": _parse_candidates(raw.get("fix_candidates"))}
     # Pydantic validates the shape, so a malformed model response fails here
     # rather than reaching the database or the UI.
     return ExplanationPayload.model_validate(raw)

@@ -48,7 +48,7 @@ export function FooterQuote({ onGetStarted }: { onGetStarted: () => void }) {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.4 }}
         transition={{ duration: 0.5, ease: 'easeOut' }}
-        className="hairline mx-auto max-w-2xl bg-panel/70 p-6 backdrop-blur"
+        className="hairline glow-accent mx-auto max-w-2xl bg-panel/70 p-6 backdrop-blur"
       >
         <div className="data mb-3 text-muted">
           <span className="text-accent">$</span> cat principles.txt

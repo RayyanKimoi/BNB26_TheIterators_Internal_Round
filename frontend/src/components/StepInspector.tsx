@@ -16,7 +16,13 @@ import { useEffect, useState } from 'react';
 
 import { api, ApiError } from '../api/client';
 import { LoadingState } from './AppShell';
-import type { DiagnosisResponse, ExplanationResponse, ForkResponse, StepDetail } from '../types/api';
+import type {
+  DiagnosisResponse,
+  ExplanationResponse,
+  ForkResponse,
+  StepDetail,
+  SuggestedFix,
+} from '../types/api';
 
 /** Cycled while a fork request is in flight, matching the two real phases of
  * the work: writing the child run, then replaying its suffix through the
@@ -135,6 +141,196 @@ function ExplainPanel({
       >
         Explain Root Cause with Gemini
       </button>
+    </div>
+  );
+}
+
+interface CandidateOutcome {
+  rank: number;
+  rationale: string;
+  patch: Record<string, unknown>;
+  result: ForkResponse | null;
+  error: string | null;
+}
+
+/**
+ * PRD item 14: fork every candidate Gemini proposed, in parallel, and show
+ * which one actually flips the run.
+ *
+ * Each candidate is a real, independent fork against the live endpoint — the
+ * ranking shown is the measured outcome of running them, not Gemini's own
+ * confidence in its suggestions. A candidate that errors is reported as
+ * errored rather than silently dropped, because "this patch could not even be
+ * replayed" is a result worth seeing.
+ */
+function CandidateForkPanel({
+  step,
+  runId,
+  candidates,
+  onForked,
+}: {
+  step: StepDetail;
+  runId: string;
+  candidates: SuggestedFix[];
+  onForked: (result: ForkResponse) => void;
+}) {
+  const [outcomes, setOutcomes] = useState<CandidateOutcome[] | null>(null);
+  const [running, setRunning] = useState(false);
+  const [savedFor, setSavedFor] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const forkAll = async () => {
+    setRunning(true);
+    setSaveError(null);
+    setSavedFor(null);
+
+    // Parallel: these are independent writes against different child runs,
+    // and serialising them would make three model passes feel like a stall.
+    const settled = await Promise.allSettled(
+      candidates.map((candidate) =>
+        api.forkRun(runId, {
+          from_step: step.step_index,
+          fix_payload: candidate.patch,
+          override_code: `Candidate ${candidate.rank}: ${candidate.rationale}`,
+        }),
+      ),
+    );
+
+    const next: CandidateOutcome[] = candidates.map((candidate, i) => {
+      const entry = settled[i];
+      return {
+        rank: candidate.rank,
+        rationale: candidate.rationale,
+        patch: candidate.patch,
+        result: entry.status === 'fulfilled' ? entry.value : null,
+        error:
+          entry.status === 'rejected'
+            ? entry.reason instanceof Error
+              ? entry.reason.message
+              : 'Fork failed'
+            : null,
+      };
+    });
+
+    setOutcomes(next);
+    setRunning(false);
+
+    // Surface the winner to the parent so the comparison view opens on a
+    // fork that actually resolved the run; fall back to any successful call.
+    const winner =
+      next.find((o) => o.result && o.result.outcome === 'success' && o.result.parent_outcome === 'failed') ??
+      next.find((o) => o.result);
+    if (winner?.result) onForked(winner.result);
+  };
+
+  const saveRegressionTest = async (outcome: CandidateOutcome) => {
+    if (!outcome.result) return;
+    setSaveError(null);
+    try {
+      await api.createRegressionTest(runId, {
+        assertion: {
+          forked_at_step: outcome.result.forked_at_step,
+          fix_payload: outcome.patch,
+          expected_outcome: outcome.result.outcome,
+          parent_outcome: outcome.result.parent_outcome,
+          child_run_id: outcome.result.child_run_id,
+          rationale: outcome.rationale,
+        },
+      });
+      setSavedFor(outcome.rank);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not save the regression test.');
+    }
+  };
+
+  if (running) {
+    return (
+      <div className="hairline flex items-center gap-3 bg-bg px-4 py-4">
+        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent" aria-hidden="true" />
+        <span className="data text-muted">
+          Forking {candidates.length} candidates in parallel and re-scoring each child run...
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {(outcomes ?? candidates.map((c) => ({ ...c, result: null, error: null }))).map((entry) => {
+        const outcome = 'result' in entry ? (entry as CandidateOutcome) : null;
+        const result = outcome?.result ?? null;
+        const flipped = result ? result.outcome === 'success' && result.parent_outcome === 'failed' : false;
+
+        return (
+          <div
+            key={entry.rank}
+            className={`hairline bg-bg p-3 ${flipped ? 'border-pass/50' : ''}`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="data rounded border border-border px-1.5 py-0.5 text-muted">
+                candidate {entry.rank}
+              </span>
+              {result && (
+                <span
+                  className={`data rounded border px-1.5 py-0.5 ${
+                    flipped
+                      ? 'border-pass/40 bg-pass/10 text-pass'
+                      : 'border-critical/40 bg-critical/10 text-critical'
+                  }`}
+                >
+                  {flipped ? 'flipped to SUCCESS' : `still ${result.outcome.toUpperCase()}`}
+                </span>
+              )}
+              {outcome?.error && (
+                <span className="data rounded border border-critical/40 bg-critical/10 px-1.5 py-0.5 text-critical">
+                  fork failed
+                </span>
+              )}
+            </div>
+
+            {entry.rationale && (
+              <p className="mt-2 text-[13px] leading-relaxed text-muted">{entry.rationale}</p>
+            )}
+
+            <pre className="data hairline mt-2 overflow-x-auto bg-panel p-2.5 text-text">
+              {JSON.stringify(entry.patch, null, 2)}
+            </pre>
+
+            {outcome?.error && (
+              <p className="data mt-2 text-critical" role="alert">
+                {outcome.error}
+              </p>
+            )}
+
+            {flipped && (
+              <button
+                type="button"
+                onClick={() => saveRegressionTest(outcome as CandidateOutcome)}
+                disabled={savedFor === entry.rank}
+                className="data hairline mt-2 rounded px-2.5 py-1 text-text transition-colors hover:border-accent/60 hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savedFor === entry.rank ? 'Saved as regression test' : 'Save as Regression Test'}
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      {saveError && (
+        <p className="data text-critical" role="alert">
+          {saveError}
+        </p>
+      )}
+
+      {!outcomes && (
+        <button
+          type="button"
+          onClick={forkAll}
+          className="self-start rounded border border-accent bg-accent/10 px-4 py-2 text-[13px] font-medium text-accent transition-colors hover:bg-accent/20"
+        >
+          Fork All {candidates.length} Candidates
+        </button>
+      )}
     </div>
   );
 }
@@ -454,6 +650,21 @@ export function StepInspector({
                     />
                   )}
                 </section>
+
+                {isFlagged && explanation && explanation.fix_candidates.length > 0 && (
+                  <section>
+                    <p className="data mb-2 uppercase tracking-[0.08em] text-muted">
+                      Candidate fixes ({explanation.fix_candidates.length})
+                    </p>
+                    <CandidateForkPanel
+                      key={`candidates-${step.id}`}
+                      step={step}
+                      runId={runId}
+                      candidates={explanation.fix_candidates}
+                      onForked={onForked}
+                    />
+                  </section>
+                )}
 
                 <section>
                   <p className="data mb-2 uppercase tracking-[0.08em] text-muted">

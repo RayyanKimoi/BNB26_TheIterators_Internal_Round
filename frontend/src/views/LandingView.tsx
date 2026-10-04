@@ -13,6 +13,7 @@ import type { Variants } from 'framer-motion';
 
 import { AnnotatedText } from '../components/ui/AnnotatedText';
 import { AsciiReveal } from '../components/ui/AsciiReveal';
+import { ClosingNotes } from '../components/ui/ClosingNotes';
 import { FeatureDeepDive } from '../components/ui/FeatureDeepDive';
 import { FooterQuote } from '../components/ui/FooterQuote';
 import { ScrollProgress } from '../components/ui/ScrollProgress';
@@ -123,6 +124,7 @@ export function LandingView({ onSignIn }: { onSignIn: () => void }) {
       <div className="mx-auto max-w-[1280px] px-4 sm:px-6">
         <FeatureDeepDive />
         <SpiralGallery />
+        <ClosingNotes />
         <FooterQuote onGetStarted={loginAsGuest} />
       </div>
     </div>

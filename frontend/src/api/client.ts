@@ -27,6 +27,7 @@ import type {
   RunDetail,
   RunFilters,
   RunSummary,
+  SettingsResponse,
   SimilarRunsResponse,
 } from '../types/api';
 
@@ -232,6 +233,11 @@ export const api = {
   /** POST /ingest/otel — map a simplified OTel-like trace into the schema. */
   ingestOtel(body: OtelIngestRequest, signal?: AbortSignal): Promise<OtelIngestResponse> {
     return request<OtelIngestResponse>('/ingest/otel', { method: 'POST', body, signal });
+  },
+
+  /** GET /settings — which config is present. Never returns secret values. */
+  getSettings(signal?: AbortSignal): Promise<SettingsResponse> {
+    return request<SettingsResponse>('/settings', { signal });
   },
 
   /** Cheap liveness probe for the header status dot. */

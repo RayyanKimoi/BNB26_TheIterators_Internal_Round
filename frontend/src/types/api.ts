@@ -144,10 +144,18 @@ export interface ExplainRequest {
   step_index: number;
 }
 
-/** The explainer's enforced output shape. */
+/**
+ * The explainer's enforced output shape.
+ *
+ * `fix_candidates` (PRD item 14) is up to 3 ranked, independently forkable
+ * patches. It defaults to `[]` server side, so an explanation cached before
+ * candidates existed still deserializes — the original three keys are
+ * widened here, never broken.
+ */
 export interface ExplanationPayload {
   root_cause: string;
   evidence_summary: string[];
+  fix_candidates: SuggestedFix[];
   proposed_fix: string;
 }
 
@@ -357,4 +365,22 @@ export interface OtelIngestResponse {
   source: string;
   steps_created: number;
   status: string;
+}
+
+/**
+ * GET /settings. Booleans for everything secret, never the values — the
+ * backend deliberately does not send `SLACK_WEBHOOK_URL` or `GEMINI_API_KEY`
+ * to the browser.
+ */
+export interface SettingsResponse {
+  gemini_configured: boolean;
+  gemini_model: string;
+  slack_configured: boolean;
+  token_cost_configured: boolean;
+  dashboard_base_url: string;
+  /** e.g. 'postgresql' or 'sqlite'. Never the full URL: it holds the password. */
+  database_dialect: string;
+  model_artifact_present: boolean;
+  trained_classes: string[];
+  held_out_classes: string[];
 }

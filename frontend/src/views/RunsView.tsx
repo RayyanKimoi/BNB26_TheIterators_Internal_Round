@@ -20,7 +20,6 @@ import { CLEAN_CLASS, EMPTY_FILTERS } from '../config/runFilters';
 import type { RunTableFilters } from '../config/runFilters';
 import { useToast } from '../hooks/useToast';
 import type { RunSummary } from '../types/api';
-import { TraceView } from './TraceView';
 
 /*
  * Measured on the held-out evaluation, not estimated. Sourced from
@@ -36,7 +35,12 @@ function distinct(values: (string | null)[]): string[] {
   return [...new Set(values.filter((v): v is string => v !== null))].sort();
 }
 
-export function RunsView() {
+export interface RunsViewProps {
+  /** Hands the selected run to the Trace tab, which owns the inspector. */
+  onOpenTrace: (runId: string) => void;
+}
+
+export function RunsView({ onOpenTrace }: RunsViewProps) {
   const toast = useToast();
   const reduced = useReducedMotion();
 
@@ -46,7 +50,6 @@ export function RunsView() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const [filters, setFilters] = useState<RunTableFilters>(EMPTY_FILTERS);
-  const [inspectingId, setInspectingId] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -113,7 +116,7 @@ export function RunsView() {
   }, [runs]);
 
   const onInspect = (run: RunSummary) => {
-    setInspectingId(run.id);
+    onOpenTrace(run.id);
   };
 
   const retry = () => {
@@ -123,16 +126,6 @@ export function RunsView() {
     setLoading(true);
     setReloadKey((k) => k + 1);
   };
-
-  if (inspectingId) {
-    return (
-      <TraceView
-        runId={inspectingId}
-        onBack={() => setInspectingId(null)}
-        onNavigateToRun={setInspectingId}
-      />
-    );
-  }
 
   if (error) {
     return <ErrorState error={error} onRetry={retry} />;
