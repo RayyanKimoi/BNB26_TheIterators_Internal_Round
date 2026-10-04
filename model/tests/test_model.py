@@ -239,6 +239,12 @@ def test_low_confidence_returns_unknown_with_a_reason(trained, corpus):
     artifact, _ = trained
     model = Localizer.load(artifact, embedder=StubEmbedder())
     model.step_threshold = 0.99  # nothing can clear this
+    # Isolate the behaviour this test names: low confidence, no invariant
+    # signal in the way. With the class-agnostic sweep active, corpus[0]
+    # legitimately trips tool_choice_entropy_high, which is correct new
+    # behaviour but a different test's concern (see
+    # test_invariant_signals_name_observations_not_diagnoses).
+    model.invariant_thresholds = {}
     d = model.diagnose(corpus[0])
     assert d["predicted_class"] == "unknown"
     assert "below" in d["unknown_reason"]
@@ -291,11 +297,29 @@ def test_invariant_tier_never_names_a_held_out_class(trained, corpus):
 
 
 def test_invariant_signals_name_observations_not_diagnoses(trained, corpus):
+    """Every anomaly_signal is an observation name, never a failure class.
+
+    The two original signals (token_collapse, state_repetition) are a fixed
+    allowlist. Everything else must be a generic `{feature}_low` /
+    `{feature}_high` reading from the class-agnostic sweep, over one of the
+    features it is actually allowed to scan (token_z, state_hash_repeat and
+    parse_failure are excluded — the first two have their own named signals,
+    the third is a 0/1 indicator with no meaningful percentile).
+    """
     artifact, _ = trained
     model = Localizer.load(artifact, embedder=StubEmbedder())
-    allowed = {None, "token_collapse", "state_repetition"}
+    named = {"token_collapse", "state_repetition"}
+    scannable = set(FEATURE_COLUMNS) - {"token_z", "state_hash_repeat", "parse_failure"}
+    generic = {f"{feature}_{tail}" for feature in scannable for tail in ("low", "high")}
+
     for run in corpus:
-        assert model.diagnose(run).get("anomaly_signal") in allowed
+        signal = model.diagnose(run).get("anomaly_signal")
+        if signal is None:
+            continue
+        assert signal in named or signal in generic
+        # The regression this project already caught once: an observation
+        # name must never collide with a class name.
+        assert signal not in FAILURE_CLASSES
 
 
 def test_invariant_thresholds_come_from_training_not_the_source(trained):
@@ -304,9 +328,18 @@ def test_invariant_thresholds_come_from_training_not_the_source(trained):
 
     artifact, _ = trained
     thresholds = joblib.load(artifact)["invariant_thresholds"]
-    assert set(thresholds) == {"token_z_floor", "state_repeat_ceiling"}
+    assert {"token_z_floor", "state_repeat_ceiling"} <= set(thresholds)
     assert thresholds["token_z_floor"] < 0
     assert thresholds["state_repeat_ceiling"] >= 0
+    # The class-agnostic sweep: every other scannable feature got both tails.
+    for feature in set(FEATURE_COLUMNS) - {"token_z", "state_hash_repeat", "parse_failure"}:
+        assert f"{feature}_floor" in thresholds
+        assert f"{feature}_ceiling" in thresholds
+        assert thresholds[f"{feature}_floor"] <= thresholds[f"{feature}_ceiling"]
+    # parse_failure is a 0/1 indicator; a percentile cut point on it is
+    # degenerate, so it is deliberately excluded from the sweep.
+    assert "parse_failure_floor" not in thresholds
+    assert "parse_failure_ceiling" not in thresholds
     source = (Path(__file__).parent.parent / "predict.py").read_text(encoding="utf-8")
     for literal in ("-1.8", "_TOKEN_Z_THRESHOLD", "_HASH_REPEAT_THRESHOLD"):
         assert literal not in source, f"{literal!r} is a hardcoded cut point"

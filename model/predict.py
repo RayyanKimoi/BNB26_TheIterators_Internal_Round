@@ -160,12 +160,21 @@ class Localizer:
             for name in EVIDENCE_FEATURES
         }
 
+        raw_steps = run.get("steps", []) if isinstance(run, dict) else []
+        raw_step = raw_steps[flagged] if flagged < len(raw_steps) else {}
+        dominant = self._dominant_feature(row)
+        evidence_path = (
+            _resolve_evidence_path(flagged, raw_step, dominant)
+            if dominant is not None
+            else f"step[{flagged}].output"
+        )
+
         return {
             "run_id": run_id,
             "flagged_step_index": flagged,
             "confidence": round(confidence, 4),
             "predicted_class": predicted_class,
-            "evidence_path": None,  # P1: field-level localization
+            "evidence_path": evidence_path,
             "evidence": evidence,
             "step_scores": [round(float(s)) for s in scores],
             "explanation": None,  # P1: filled by the Gemini explainer
@@ -182,38 +191,134 @@ class Localizer:
     def _invariant_check(self, frame: pd.DataFrame) -> tuple[int, str] | None:
         """Find a step that is extreme against the TRAINING distribution.
 
-        Returns ``(step_index, signal_name)`` or ``None``. The signal names an
-        observation (``token_collapse``, ``state_repetition``), never a
-        failure class. Cut points come from ``invariant_thresholds`` in
-        model/train.py, computed from training rows only, so nothing here is
-        derived from the held-out classes.
+        Returns ``(step_index, signal_name)`` or ``None``. Every signal names
+        an observation, never a failure class. Cut points come from
+        ``invariant_thresholds`` in model/train.py, computed from training
+        rows only, so nothing here is derived from the held-out classes.
+
+        Two tiers, tried in order, not one flat comparison:
+
+        **Tier A — the two originally validated signals.** ``token_collapse``
+        and ``state_repetition`` are the signatures already measured against
+        the two held-out classes (token_z collapse for context_truncation,
+        state_hash explosion for infinite_loop). They are tried first, on
+        their own raw-unit scale, exactly as before this tier existed.
+        ``state_repetition`` flags the first step of the repeating block,
+        since that is where a developer forks from, not the last symptom.
+
+        **Tier B — the class-agnostic sweep, only when Tier A found nothing.**
+        Every other feature with training-derived thresholds gets a generic
+        two-sided check, named ``{feature}_low`` / ``{feature}_high``, for
+        failure modes that are neither of the two shapes Tier A already
+        covers. Its candidates are normalized by each feature's own band
+        width so they are comparable to each other.
+
+        Tiers are not merged into one ranked list: an early version did that,
+        and on this corpus it regressed held-out accuracy by letting a noisy
+        generic candidate on an unrelated feature outrank state_repetition on
+        genuine infinite_loop cases — eight new, untested candidates drowning
+        out the two that were actually measured. Trying A first and only
+        falling through to B keeps A's measured performance intact while
+        still giving B room to catch something truly novel.
         """
         token_floor = self.invariant_thresholds.get("token_z_floor")
         repeat_ceiling = self.invariant_thresholds.get("state_repeat_ceiling")
-        if token_floor is None or repeat_ceiling is None:
+        tier_a: list[tuple[float, int, str]] = []
+
+        if token_floor is not None:
+            tz = frame["token_z"].astype(float).to_numpy()
+            if (tz < token_floor).any():
+                step = int(np.nanargmin(tz))
+                tier_a.append((float(token_floor - tz[step]), step, "token_collapse"))
+
+        if repeat_ceiling is not None:
+            shr = frame["state_hash_repeat"].astype(float).to_numpy()
+            loop_mask = shr > repeat_ceiling
+            if loop_mask.any():
+                # First step of the block: where a developer forks from, not
+                # the last symptom of the cycle.
+                step = int(np.flatnonzero(loop_mask)[0])
+                tier_a.append((float(shr[step] - repeat_ceiling), step, "state_repetition"))
+
+        if tier_a:
+            _, step, signal = max(tier_a, key=lambda c: c[0])
+            return step, signal
+
+        tier_b: list[tuple[float, int, str]] = []
+        for name in EVIDENCE_FEATURES:
+            if name in ("token_z", "state_hash_repeat", "parse_failure"):
+                continue
+            floor = self.invariant_thresholds.get(f"{name}_floor")
+            ceiling = self.invariant_thresholds.get(f"{name}_ceiling")
+            if floor is None or ceiling is None:
+                continue
+            values = frame[name].astype(float).to_numpy()
+            valid = ~np.isnan(values)
+            width = max(ceiling - floor, 1e-9)
+
+            below = valid & (values < floor)
+            if below.any():
+                step = int(np.flatnonzero(below)[0])
+                tier_b.append(((floor - values[step]) / width, step, f"{name}_low"))
+
+            above = valid & (values > ceiling)
+            if above.any():
+                step = int(np.flatnonzero(above)[0])
+                tier_b.append(((values[step] - ceiling) / width, step, f"{name}_high"))
+
+        if not tier_b:
             return None
-
-        tz = frame["token_z"].astype(float).to_numpy()
-        shr = frame["state_hash_repeat"].astype(float).to_numpy()
-        candidates: list[tuple[float, int, str]] = []
-
-        # A token count below the 1st percentile of training steps.
-        if (tz < token_floor).any():
-            step = int(np.nanargmin(tz))
-            candidates.append((float(token_floor - tz[step]), step, "token_collapse"))
-
-        # A state recurring more often than 99% of training steps. The flagged
-        # step is the FIRST of the repeating block, because that is the step a
-        # developer forks from, not the last symptom of the cycle.
-        loop_mask = shr > repeat_ceiling
-        if loop_mask.any():
-            step = int(np.flatnonzero(loop_mask)[0])
-            candidates.append((float(shr[step] - repeat_ceiling), step, "state_repetition"))
-
-        if not candidates:
-            return None
-        _, step, signal = max(candidates, key=lambda c: c[0])  # largest deviation wins
+        _, step, signal = max(tier_b, key=lambda c: c[0])
         return step, signal
+
+    def _dominant_feature(self, row: pd.Series) -> str | None:
+        """Which evidence feature on this step deviates most from the
+        training distribution, used to anchor `evidence_path` at a plausible
+        region of the step's real payload (field-level localization).
+
+        Reuses the same training-derived percentile thresholds as the
+        invariant tier, just for attribution rather than for naming an
+        anomaly — this runs regardless of whether the classifier or the
+        invariant tier produced the diagnosis. Returns None when nothing
+        deviates meaningfully, so the caller falls back to pointing at the
+        step's output as a whole rather than guessing.
+        """
+        if bool(row.get("parse_failure")):
+            return "parse_failure"
+
+        best_feature: str | None = None
+        best_score = 0.0
+        for name in EVIDENCE_FEATURES:
+            if name == "parse_failure":
+                continue
+            value = row.get(name)
+            if value is None or _is_nan(value):
+                continue
+            if name == "token_z":
+                floor = self.invariant_thresholds.get("token_z_floor")
+                ceiling = None
+            elif name == "state_hash_repeat":
+                floor = None
+                ceiling = self.invariant_thresholds.get("state_repeat_ceiling")
+            else:
+                floor = self.invariant_thresholds.get(f"{name}_floor")
+                ceiling = self.invariant_thresholds.get(f"{name}_ceiling")
+            if floor is None and ceiling is None:
+                continue
+
+            value = float(value)
+            score = 0.0
+            if floor is not None and value < floor:
+                width = max(abs(floor), 1e-9)
+                score = (floor - value) / width
+            if ceiling is not None and value > ceiling:
+                width = max(abs(ceiling), 1e-9)
+                score = max(score, (value - ceiling) / width)
+
+            if score > best_score:
+                best_score = score
+                best_feature = name
+        return best_feature
 
     def _unknown_reason(
         self, confidence: float, class_confidence: float, predicted_class: str,
@@ -223,14 +328,21 @@ class Localizer:
         if predicted_class != "unknown":
             return None
         if anomaly_signal is not None:
-            label = {
+            named = {
                 "token_collapse": (
                     "a token count below the 1st percentile of training steps"
                 ),
                 "state_repetition": (
                     "a state recurring above the 99th percentile of training steps"
                 ),
-            }[anomaly_signal]
+            }
+            if anomaly_signal in named:
+                label = named[anomaly_signal]
+            else:
+                # Generic class-agnostic signal: "{feature}_low" / "{feature}_high".
+                feature, _, direction = anomaly_signal.rpartition("_")
+                tail = "below the 1st" if direction == "low" else "above the 99th"
+                label = f"{feature} {tail} percentile of training steps"
             return (
                 f"flagged by a distribution check rather than the classifier: {label}. "
                 f"The failure mode is not one of the {len(self.trained_classes)} classes "
@@ -254,6 +366,54 @@ def _is_nan(value: Any) -> bool:
         return bool(np.isnan(float(value)))
     except (TypeError, ValueError):
         return False
+
+
+# Keys that frame every step's output regardless of what went wrong, so they
+# are skipped when guessing which output key actually carries the problem.
+_ENVELOPE_KEYS = ("summary", "status", "_meta", "text")
+
+
+def _resolve_evidence_path(step_index: int, raw_step: dict[str, Any], feature: str) -> str:
+    """Best-effort JSON path to the field the dominant evidence feature most
+    likely reflects, existence-checked against this step's real payload where
+    the mapping is specific enough to check.
+
+    This is a pointer for the inspector to start reading, not a claim of
+    exact ground truth: there is no recorded ground-truth field name on an
+    arbitrary run (a fork, or one ingested from OTel/LangGraph), only on the
+    synthetic corpus's sidecar manifest, which this never reads from — using
+    it would be answering the question with the label.
+    """
+    prefix = f"step[{step_index}]"
+    output = raw_step.get("output") or {}
+    meta = output.get("_meta") or {}
+
+    if feature == "retry_count" and "retry_count" in meta:
+        return f"{prefix}.output._meta.retry_count"
+    if feature == "parse_failure" and "parse_failure" in meta:
+        return f"{prefix}.output._meta.parse_failure"
+    if feature == "tool_choice_entropy" and "entropy" in output:
+        return f"{prefix}.output.entropy"
+    if feature == "downstream_error_count" and "error" in output:
+        return f"{prefix}.output.error"
+    if feature == "arg_novelty":
+        inp = raw_step.get("input") or {}
+        if inp:
+            return f"{prefix}.input.{next(iter(inp))}"
+    if feature == "state_hash_repeat":
+        return f"{prefix}.state_snapshot"
+    if feature == "duration_z":
+        return f"{prefix}.duration_ms"
+    if feature == "token_z":
+        return f"{prefix}.tokens"
+
+    # semantic_deviation, position_ratio, or a feature whose specific region
+    # was not present on this step: the first non-envelope output key usually
+    # carries the actual payload.
+    for key in output:
+        if key not in _ENVELOPE_KEYS:
+            return f"{prefix}.output.{key}"
+    return f"{prefix}.output"
 
 
 def _empty_diagnosis(run_id: str | None) -> dict[str, Any]:

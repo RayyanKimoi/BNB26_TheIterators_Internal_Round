@@ -40,6 +40,18 @@ const PAIRS = [
   ['ExplanationPayload', 'ExplanationPayload'],
   ['ForkRequest', 'ForkRequest'],
   ['ForkResponse', 'ForkResponse'],
+  ['StepDiff', 'StepDiff'],
+  ['CompareResponse', 'CompareResponse'],
+  ['SimilarRun', 'SimilarRun'],
+  ['SimilarRunsResponse', 'SimilarRunsResponse'],
+  ['RegressionTestRequest', 'RegressionTestRequest'],
+  ['RegressionTestResponse', 'RegressionTestResponse'],
+  ['FailureClassCount', 'FailureClassCount'],
+  ['ReliabilityTrendPoint', 'ReliabilityTrendPoint'],
+  ['ReliabilityResponse', 'ReliabilityResponse'],
+  ['OtelSpan', 'OtelSpan'],
+  ['OtelIngestRequest', 'OtelIngestRequest'],
+  ['OtelIngestResponse', 'OtelIngestResponse'],
 ];
 
 /** Interfaces that extend another, whose inherited fields are declared there. */

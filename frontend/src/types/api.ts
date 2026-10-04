@@ -27,8 +27,14 @@ export type PredictedClass = FailureClass | 'unknown';
  * Set when the distribution-relative invariant tier flagged the step instead
  * of the classifier. These name an OBSERVATION, never a failure class.
  * Whenever this is non-null, `predicted_class` is `'unknown'`.
+ *
+ * `token_collapse` and `state_repetition` are the two original, specially
+ * handled signals. Every other feature gets a generic two-sided check named
+ * `{feature}_low` / `{feature}_high` (the class-agnostic invariant sweep —
+ * see model/predict.py::Localizer._invariant_check), which is why this is a
+ * template literal type over `FeatureName` rather than a fixed enum.
  */
-export type AnomalySignal = 'token_collapse' | 'state_repetition';
+export type AnomalySignal = 'token_collapse' | 'state_repetition' | `${FeatureName}_low` | `${FeatureName}_high`;
 
 export type RunStatus = 'success' | 'failed';
 export type RunSource = 'synthetic' | 'langgraph' | 'otel';
@@ -228,4 +234,127 @@ export interface RunFilters {
   status?: RunStatus;
   source?: RunSource;
   injected_class?: FailureClass;
+}
+
+// ---------------------------------------------------------------------------
+// Completion pass: comparison, similarity search, regression tests, the
+// reliability dashboard, and OTel ingestion.
+// ---------------------------------------------------------------------------
+
+/** One aligned position in two runs' step sequences, by step_index. */
+export interface StepDiff {
+  step_index: number;
+  a_present: boolean;
+  b_present: boolean;
+  a_tool_name: string | null;
+  b_tool_name: string | null;
+  a_error_flag: boolean | null;
+  b_error_flag: boolean | null;
+  tool_changed: boolean;
+  error_flag_changed: boolean;
+  output_changed: boolean;
+  changed_output_keys: string[];
+}
+
+/** GET /runs/{id}/compare/{other_id} */
+export interface CompareResponse {
+  run_a_id: string;
+  run_b_id: string;
+  run_a_status: string;
+  run_b_status: string;
+  steps_compared: number;
+  diffs: StepDiff[];
+}
+
+/** One historical match from GET /runs/{id}/similar. */
+export interface SimilarRun {
+  run_id: string;
+  /** Cosine similarity, 1.0 = identical. */
+  similarity: number;
+  predicted_class: PredictedClass;
+  flagged_step_index: number;
+  injected_class: FailureClass | null;
+}
+
+export interface SimilarRunsResponse {
+  run_id: string;
+  /** How many other diagnosed runs were searched. */
+  compared_against: number;
+  matches: SimilarRun[];
+}
+
+/** Body for POST /runs/{id}/regression-test. Omit diagnosis_id to assert
+ * against the run's current (most recent) diagnosis. */
+export interface RegressionTestRequest {
+  diagnosis_id?: string | null;
+  assertion: Record<string, unknown>;
+}
+
+export interface RegressionTestResponse {
+  id: string;
+  diagnosis_id: string;
+  assertion: Record<string, unknown>;
+  /** ISO 8601 string on the wire. */
+  created_at: string;
+}
+
+export interface FailureClassCount {
+  injected_class: string;
+  count: number;
+}
+
+/** One daily bucket of the reliability trend. */
+export interface ReliabilityTrendPoint {
+  /** ISO date (UTC), e.g. 2026-10-04. */
+  date: string;
+  total_runs: number;
+  success_count: number;
+  pass_rate: number;
+  total_tokens: number;
+  avg_duration_ms: number;
+  /** This day's average duration vs. the whole period's mean/std. */
+  duration_zscore: number;
+}
+
+/**
+ * GET /dashboard/reliability. `estimated_cost_usd` is null unless the backend
+ * has `TOKEN_COST_PER_1K_USD` configured — there is no default rate, so a
+ * null here means "not configured," never a silently-assumed price.
+ */
+export interface ReliabilityResponse {
+  total_runs: number;
+  success_count: number;
+  failure_count: number;
+  overall_pass_rate: number;
+  failure_class_breakdown: FailureClassCount[];
+  trend: ReliabilityTrendPoint[];
+  total_tokens: number;
+  estimated_cost_usd: number | null;
+  cost_rate_configured: boolean;
+}
+
+/**
+ * One span in a simplified OTel-like ingestion request. Not full OTLP — see
+ * backend/models.py::OtelSpan for why.
+ */
+export interface OtelSpan {
+  span_id: string;
+  name: string;
+  start_time_unix_nano: number;
+  end_time_unix_nano: number;
+  attributes: Record<string, unknown>;
+  status_code: string;
+}
+
+export interface OtelIngestRequest {
+  trace_id: string;
+  task_type: string;
+  spans: OtelSpan[];
+}
+
+export interface OtelIngestResponse {
+  run_id: string;
+  source: string;
+  steps_created: number;
+  status: string;
 }

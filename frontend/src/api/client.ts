@@ -12,15 +12,22 @@
  */
 
 import type {
+  CompareResponse,
   DiagnosisResponse,
   EvaluationResponse,
   ExplainRequest,
   ExplanationResponse,
   ForkRequest,
   ForkResponse,
+  OtelIngestRequest,
+  OtelIngestResponse,
+  RegressionTestRequest,
+  RegressionTestResponse,
+  ReliabilityResponse,
   RunDetail,
   RunFilters,
   RunSummary,
+  SimilarRunsResponse,
 } from '../types/api';
 
 /** Falls back to the local backend so a fresh clone runs with no .env. */
@@ -183,6 +190,48 @@ export const api = {
   /** GET /model/evaluation — the numbers behind the Model tab. */
   getEvaluation(signal?: AbortSignal): Promise<EvaluationResponse> {
     return request<EvaluationResponse>('/model/evaluation', { signal });
+  },
+
+  /** GET /runs/{id}/compare/{other_id} — aligned step-by-step diff. */
+  compareRuns(runId: string, otherId: string, signal?: AbortSignal): Promise<CompareResponse> {
+    return request<CompareResponse>(
+      `/runs/${encodeURIComponent(runId)}/compare/${encodeURIComponent(otherId)}`,
+      { signal },
+    );
+  },
+
+  /** GET /runs/{id}/similar — cosine similarity over stored feature vectors. */
+  getSimilarRuns(
+    runId: string,
+    limit?: number,
+    signal?: AbortSignal,
+  ): Promise<SimilarRunsResponse> {
+    const query = limit ? `?limit=${limit}` : '';
+    return request<SimilarRunsResponse>(`/runs/${encodeURIComponent(runId)}/similar${query}`, {
+      signal,
+    });
+  },
+
+  /** POST /runs/{id}/regression-test — persist a confirmed fix assertion. */
+  createRegressionTest(
+    runId: string,
+    body: RegressionTestRequest,
+    signal?: AbortSignal,
+  ): Promise<RegressionTestResponse> {
+    return request<RegressionTestResponse>(
+      `/runs/${encodeURIComponent(runId)}/regression-test`,
+      { method: 'POST', body, signal },
+    );
+  },
+
+  /** GET /dashboard/reliability — aggregate pass rate, failure mix, trend. */
+  getReliability(signal?: AbortSignal): Promise<ReliabilityResponse> {
+    return request<ReliabilityResponse>('/dashboard/reliability', { signal });
+  },
+
+  /** POST /ingest/otel — map a simplified OTel-like trace into the schema. */
+  ingestOtel(body: OtelIngestRequest, signal?: AbortSignal): Promise<OtelIngestResponse> {
+    return request<OtelIngestResponse>('/ingest/otel', { method: 'POST', body, signal });
   },
 
   /** Cheap liveness probe for the header status dot. */

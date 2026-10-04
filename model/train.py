@@ -305,24 +305,49 @@ def leave_one_class_out(
 def invariant_thresholds(frame: pd.DataFrame) -> dict[str, float]:
     """Derive the invariant tier's cut points from the TRAINING distribution.
 
-    The invariant tier needs to know what counts as an extreme token collapse
-    or an extreme state repetition. Those numbers must come from the training
-    rows, never from inspecting the held-out classes: a threshold reverse
-    engineered from `context_truncation` traces is held-out tuning wearing a
-    disguise, and it makes any generalization claim circular.
+    The invariant tier needs to know what counts as an extreme token collapse,
+    an extreme state repetition, or an extreme reading on any of the other
+    eight features. Those numbers must come from the training rows, never
+    from inspecting the held-out classes: a threshold reverse engineered from
+    `context_truncation` traces is held-out tuning wearing a disguise, and it
+    makes any generalization claim circular.
 
     Percentiles of the training rows are distribution facts the model is
     already allowed to see, so they carry no information about an unseen
     failure mode beyond "this is unusual here".
+
+    `token_z_floor` and `state_repeat_ceiling` keep their original names for
+    backward compatibility with any artifact or test reading them directly;
+    every other feature gets both tails under `{feature}_floor` /
+    `{feature}_ceiling` so the invariant tier is not hand-limited to the two
+    signatures that happen to match the two held-out classes (Phase 2
+    hardening: a class-agnostic scan, not two special cases).
+
+    `parse_failure` is excluded: it is a 0/1 indicator, not a continuous
+    distribution, so a percentile cut point on it is degenerate — the 99th
+    percentile of a column that is 1 only 2% of the time is 0, which would
+    fire on almost every occurrence rather than on a genuinely rare one.
     """
     token_z = frame["token_z"].astype(float).to_numpy()
     repeats = frame["state_hash_repeat"].astype(float).to_numpy()
-    return {
-        # 1st percentile: a token count in the bottom 1% of everything seen.
+    thresholds: dict[str, float] = {
         "token_z_floor": float(np.percentile(token_z, 1)),
-        # 99th percentile: a state recurring more than 99% of training steps do.
         "state_repeat_ceiling": float(np.percentile(repeats, 99)),
     }
+
+    for col in FEATURE_COLUMNS:
+        if col in ("token_z", "state_hash_repeat", "parse_failure"):
+            continue
+        values = frame[col].astype(float).to_numpy()
+        values = values[~np.isnan(values)]
+        # Too few non-NaN rows (e.g. tool_choice_entropy off non-decide steps
+        # in a small split) for a 1st/99th percentile to mean anything.
+        if values.size < 20:
+            continue
+        thresholds[f"{col}_floor"] = float(np.percentile(values, 1))
+        thresholds[f"{col}_ceiling"] = float(np.percentile(values, 99))
+
+    return thresholds
 
 
 @dataclass

@@ -36,12 +36,15 @@ Source of truth is `backend/models.py::DiagnosisResponse`. Mirror it, never fork
   "suggested_fixes": [{"rank": 1, "patch": {}, "rationale": "..."}],  // P1 Gemini
   "class_confidence": 0.92,            // class head probability, 0.0 when unknown
   "unknown_reason": null,              // why no class was named, null when named
-  "anomaly_signal": null               // "token_collapse" | "state_repetition" | null
+  "anomaly_signal": null               // "token_collapse" | "state_repetition" | "{feature}_low" | "{feature}_high" | null
 }
 `shap` and `evidence` keys are always real feature names from the ten columns.
 `anomaly_signal` set means the distribution-relative invariant tier flagged the
 step, not the classifier. It names an observation, never a class, so whenever it
-is set `predicted_class` is "unknown".
+is set `predicted_class` is "unknown". The tier is class-agnostic: beyond the two
+original named signals (`token_collapse`, `state_repetition`), every other
+feature gets a generic two-sided training-percentile check, named
+`{feature}_low` / `{feature}_high` (e.g. `semantic_deviation_high`).
 
 ## Design tokens
 bg #0A0A0B · panel #111113 · border #1F1F23 · text #E8E8E8 · muted #8A8A92 · accent #7DF9C4 · warn #E8B14C · critical #E0574C · pass #5BC98C

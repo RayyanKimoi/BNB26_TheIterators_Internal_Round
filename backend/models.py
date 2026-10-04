@@ -268,3 +268,150 @@ class ForkResponse(BaseModel):
     diagnosis: DiagnosisResponse | None = Field(
         None, description="Fresh diagnosis of the child run"
     )
+
+
+# ---------------------------------------------------------------------------
+# Completion pass: comparison, similarity search, regression tests, the
+# reliability dashboard, and OTel ingestion.
+# ---------------------------------------------------------------------------
+
+
+class StepDiff(BaseModel):
+    """One aligned position in the two runs' step sequences.
+
+    "Aligned" means by step_index, not by meaning — a fork's suffix is the
+    same length as its parent's from `forked_at_step` on, but two arbitrary
+    runs being compared may simply differ in length, which `a_present` /
+    `b_present` make explicit rather than silently truncating.
+    """
+
+    step_index: int
+    a_present: bool
+    b_present: bool
+    a_tool_name: str | None = None
+    b_tool_name: str | None = None
+    a_error_flag: bool | None = None
+    b_error_flag: bool | None = None
+    tool_changed: bool = False
+    error_flag_changed: bool = False
+    output_changed: bool = False
+    changed_output_keys: list[str] = Field(default_factory=list)
+
+
+class CompareResponse(BaseModel):
+    """GET /runs/{id}/compare/{other_id}: aligned step-by-step diff."""
+
+    run_a_id: str
+    run_b_id: str
+    run_a_status: str
+    run_b_status: str
+    steps_compared: int = Field(..., description="max(len(a.steps), len(b.steps))")
+    diffs: list[StepDiff]
+
+
+class SimilarRun(BaseModel):
+    """One historical match from GET /runs/{id}/similar."""
+
+    run_id: str
+    similarity: float = Field(..., ge=-1.0, le=1.0, description="Cosine similarity, 1.0 = identical")
+    predicted_class: str
+    flagged_step_index: int
+    injected_class: str | None = None
+
+
+class SimilarRunsResponse(BaseModel):
+    run_id: str
+    compared_against: int = Field(..., description="How many other diagnosed runs were searched")
+    matches: list[SimilarRun]
+
+
+class RegressionTestRequest(BaseModel):
+    """Body for POST /runs/{id}/regression-test.
+
+    `diagnosis_id` is optional: omit it to assert against the run's current
+    (most recent) diagnosis, which is the common case right after confirming
+    a fix worked.
+    """
+
+    diagnosis_id: str | None = None
+    assertion: dict[str, Any] = Field(
+        ..., description="What must still hold true, e.g. {'predicted_class': 'stale_retrieval'}"
+    )
+
+
+class RegressionTestResponse(BaseModel):
+    id: str
+    diagnosis_id: str
+    assertion: dict[str, Any]
+    created_at: datetime
+
+
+class FailureClassCount(BaseModel):
+    injected_class: str
+    count: int
+
+
+class ReliabilityTrendPoint(BaseModel):
+    """One daily bucket of the reliability trend."""
+
+    date: str = Field(..., description="ISO date (UTC), e.g. 2026-10-04")
+    total_runs: int
+    success_count: int
+    pass_rate: float
+    total_tokens: int
+    avg_duration_ms: float
+    duration_zscore: float = Field(
+        ..., description="This day's average duration vs. the whole period's mean/std"
+    )
+
+
+class ReliabilityResponse(BaseModel):
+    """GET /dashboard/reliability: aggregate reliability over time.
+
+    `estimated_cost_usd` is null unless the TOKEN_COST_PER_1K_USD environment
+    variable is set. There is no configured per-token price anywhere in this
+    project, and inventing one would put a fabricated dollar figure on a
+    dashboard whose whole premise is reporting only measured numbers.
+    """
+
+    total_runs: int
+    success_count: int
+    failure_count: int
+    overall_pass_rate: float
+    failure_class_breakdown: list[FailureClassCount]
+    trend: list[ReliabilityTrendPoint]
+    total_tokens: int
+    estimated_cost_usd: float | None = None
+    cost_rate_configured: bool = Field(
+        ..., description="Whether TOKEN_COST_PER_1K_USD was set for this read"
+    )
+
+
+class OtelSpan(BaseModel):
+    """One span in a simplified OTel-like ingestion request.
+
+    Not full OTLP: real OTLP is resourceSpans -> scopeSpans -> spans protobuf
+    JSON, considerably more than this project's ingestion needs justify. This
+    is the flattened shape ingest/otel actually consumes, documented as such
+    rather than claimed to be spec-complete.
+    """
+
+    span_id: str
+    name: str
+    start_time_unix_nano: int
+    end_time_unix_nano: int
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    status_code: str = Field("OK", description="'OK' or 'ERROR', OTel's own convention")
+
+
+class OtelIngestRequest(BaseModel):
+    trace_id: str
+    task_type: str = "otel_ingest"
+    spans: list[OtelSpan]
+
+
+class OtelIngestResponse(BaseModel):
+    run_id: str
+    source: str = "otel"
+    steps_created: int
+    status: str

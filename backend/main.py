@@ -1,36 +1,62 @@
 """Black Box — FastAPI backend.
 
 Endpoints:
-    GET  /runs                  List all runs
-    GET  /runs/{id}             Full trace with steps and diagnosis
-    GET  /model/evaluation      Serve evaluation.json and metrics.json
-    POST /runs/{id}/diagnose    Run the Hybrid Sentry Engine, save to DB, return result
+    GET  /runs                          List all runs
+    GET  /runs/{id}                     Full trace with steps and diagnosis
+    GET  /model/evaluation              Serve evaluation.json and metrics.json
+    POST /runs/{id}/diagnose            Run the Hybrid Sentry Engine, save to DB, return result
+    POST /runs/{id}/explain             Gemini root cause for one step
+    POST /runs/{id}/fork                Fork + deterministic suffix replay
+    GET  /runs/{id}/compare/{other_id}  Aligned step-by-step diff between any two runs
+    GET  /runs/{id}/similar             Cosine similarity search over stored feature vectors
+    POST /runs/{id}/regression-test     Persist a confirmed fix assertion
+    GET  /dashboard/reliability         Aggregate pass rate, failure mix, trend over time
+    POST /ingest/otel                   Map a simplified OTel-like trace into the schema
 """
 
 from __future__ import annotations
 
 import json
+import os
+import statistics
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from backend.db import AgentRun, Diagnosis, Step, StepScore
+from backend.alerts import send_diagnosis_alert
+from backend.db import AgentRun, Diagnosis, RegressionTest, Step, StepScore
 from backend.engine import create_db_and_tables, get_session
 from backend.explainer import ExplainerClient, GeminiExplainer, explain
 from backend.models import (
+    CompareResponse,
     DiagnosisResponse,
     ExplainRequest,
     ExplanationResponse,
+    FailureClassCount,
     ForkRequest,
     ForkResponse,
+    OtelIngestRequest,
+    OtelIngestResponse,
+    OtelSpan,
+    RegressionTestRequest,
+    RegressionTestResponse,
+    ReliabilityResponse,
+    ReliabilityTrendPoint,
     RunDetail,
     RunSummary,
+    SimilarRun,
+    SimilarRunsResponse,
     StepDetail,
+    StepDiff,
 )
+from generator.schema import state_hash
+from model.predict import EVIDENCE_FEATURES
 from replay.engine import outcome_of, replay_suffix
 
 app = FastAPI(
@@ -412,6 +438,18 @@ def diagnose_run(run_id: str, session: Session = Depends(get_session)):
     _persist_diagnosis(session, run_id, raw_diagnosis)
     session.commit()
 
+    # Best-effort, non-blocking: never let a Slack outage fail a diagnosis.
+    try:
+        send_diagnosis_alert(
+            run_id=run_id,
+            task_type=run.task_type,
+            flagged_step_index=raw_diagnosis["flagged_step_index"],
+            predicted_class=raw_diagnosis["predicted_class"],
+            evidence=raw_diagnosis.get("evidence"),
+        )
+    except Exception:  # noqa: BLE001 - an alert must never fail the request
+        pass
+
     return _diagnosis_response(raw_diagnosis)
 
 
@@ -612,3 +650,331 @@ def fork_run(
         ],
         diagnosis=_diagnosis_response(raw),
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /runs/{id}/compare/{other_id} — aligned step-by-step diff
+# ---------------------------------------------------------------------------
+
+
+@app.get("/runs/{run_id}/compare/{other_id}", response_model=CompareResponse)
+def compare_runs(run_id: str, other_id: str, session: Session = Depends(get_session)):
+    """Aligned step-by-step diff between any two runs.
+
+    Not limited to a fork pair: any two run ids diagnosed or not, same task or
+    different, can be compared. Alignment is by step_index; a1_present /
+    b_present make an unequal-length pair explicit rather than truncating.
+    """
+    run_a = session.get(AgentRun, run_id)
+    run_b = session.get(AgentRun, other_id)
+    if not run_a:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    if not run_b:
+        raise HTTPException(status_code=404, detail=f"Run {other_id} not found")
+
+    steps_a = sorted(
+        session.exec(select(Step).where(Step.run_id == run_id)).all(),
+        key=lambda s: s.step_index,
+    )
+    steps_b = sorted(
+        session.exec(select(Step).where(Step.run_id == other_id)).all(),
+        key=lambda s: s.step_index,
+    )
+    by_a = {s.step_index: s for s in steps_a}
+    by_b = {s.step_index: s for s in steps_b}
+    length = max([*by_a.keys(), *by_b.keys(), -1]) + 1
+
+    diffs: list[StepDiff] = []
+    for i in range(length):
+        a, b = by_a.get(i), by_b.get(i)
+        a_out = (a.output or {}) if a else {}
+        b_out = (b.output or {}) if b else {}
+        changed_keys = sorted(
+            key for key in set(a_out) | set(b_out) if a_out.get(key) != b_out.get(key)
+        )
+        diffs.append(
+            StepDiff(
+                step_index=i,
+                a_present=a is not None,
+                b_present=b is not None,
+                a_tool_name=a.tool_name if a else None,
+                b_tool_name=b.tool_name if b else None,
+                a_error_flag=a.error_flag if a else None,
+                b_error_flag=b.error_flag if b else None,
+                tool_changed=bool(a and b and a.tool_name != b.tool_name),
+                error_flag_changed=bool(a and b and a.error_flag != b.error_flag),
+                output_changed=bool(changed_keys),
+                changed_output_keys=changed_keys,
+            )
+        )
+
+    return CompareResponse(
+        run_a_id=run_id,
+        run_b_id=other_id,
+        run_a_status=run_a.status,
+        run_b_status=run_b.status,
+        steps_compared=length,
+        diffs=diffs,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /runs/{id}/similar — cosine similarity over stored feature vectors
+# ---------------------------------------------------------------------------
+
+
+def _vectorize(evidence: dict[str, Any] | None) -> np.ndarray:
+    """The ten evidence features as a fixed-order vector. None/NaN -> 0.0,
+    which is a neutral midpoint for every one of these columns, not a
+    fabricated reading: it means "no signal," the same as the column being
+    absent, and only affects which runs end up looking similar, never any
+    number shown as a diagnosis."""
+    evidence = evidence or {}
+    return np.array([float(evidence.get(name) or 0.0) for name in EVIDENCE_FEATURES], dtype=float)
+
+
+@app.get("/runs/{run_id}/similar", response_model=SimilarRunsResponse)
+def similar_runs(run_id: str, limit: int = 5, session: Session = Depends(get_session)):
+    """Cosine similarity search over every other diagnosed run's stored
+    feature_vector, to surface matching historical failures — the "have we
+    seen this before" memory the inspector can point to."""
+    target = session.exec(
+        select(Diagnosis).where(Diagnosis.run_id == run_id).order_by(Diagnosis.created_at.desc())
+    ).first()
+    if not target:
+        raise HTTPException(
+            status_code=404, detail=f"Run {run_id} has no diagnosis to compare from"
+        )
+
+    target_vec = _vectorize(target.feature_vector)
+    target_norm = float(np.linalg.norm(target_vec))
+
+    candidates = session.exec(select(Diagnosis).order_by(Diagnosis.created_at.desc())).all()
+    scored: list[tuple[float, Diagnosis]] = []
+    seen_runs: set[str] = set()
+    for diag in candidates:
+        if diag.run_id == run_id or diag.run_id in seen_runs:
+            continue
+        seen_runs.add(diag.run_id)
+        vec = _vectorize(diag.feature_vector)
+        norm = float(np.linalg.norm(vec))
+        similarity = (
+            0.0 if target_norm == 0 or norm == 0 else float(np.dot(target_vec, vec) / (target_norm * norm))
+        )
+        scored.append((similarity, diag))
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+
+    matches = []
+    for similarity, diag in scored[: max(0, limit)]:
+        other_run = session.get(AgentRun, diag.run_id)
+        matches.append(
+            SimilarRun(
+                run_id=diag.run_id,
+                similarity=round(similarity, 4),
+                predicted_class=diag.predicted_class,
+                flagged_step_index=diag.flagged_step_index,
+                injected_class=other_run.injected_class if other_run else None,
+            )
+        )
+
+    return SimilarRunsResponse(run_id=run_id, compared_against=len(seen_runs), matches=matches)
+
+
+# ---------------------------------------------------------------------------
+# POST /runs/{id}/regression-test — persist a confirmed fix assertion
+# ---------------------------------------------------------------------------
+
+
+@app.post("/runs/{run_id}/regression-test", response_model=RegressionTestResponse)
+def create_regression_test(
+    run_id: str, body: RegressionTestRequest, session: Session = Depends(get_session)
+):
+    """Persist a confirmed fix assertion against a run's diagnosis.
+
+    Defaults to the run's most recent diagnosis when `diagnosis_id` is
+    omitted, the common case right after confirming a fork's fix worked.
+    """
+    run = session.get(AgentRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    if body.diagnosis_id:
+        diagnosis = session.get(Diagnosis, body.diagnosis_id)
+        if not diagnosis or diagnosis.run_id != run_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"diagnosis {body.diagnosis_id} does not belong to run {run_id}",
+            )
+    else:
+        diagnosis = session.exec(
+            select(Diagnosis).where(Diagnosis.run_id == run_id).order_by(Diagnosis.created_at.desc())
+        ).first()
+        if not diagnosis:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Run {run_id} has no diagnosis to attach a regression test to",
+            )
+
+    test = RegressionTest(diagnosis_id=diagnosis.id, assertion=body.assertion)
+    session.add(test)
+    session.commit()
+    session.refresh(test)
+
+    return RegressionTestResponse(
+        id=test.id,
+        diagnosis_id=test.diagnosis_id,
+        assertion=test.assertion or {},
+        created_at=test.created_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /dashboard/reliability — aggregate reliability over time
+# ---------------------------------------------------------------------------
+
+
+@app.get("/dashboard/reliability", response_model=ReliabilityResponse)
+def reliability_dashboard(session: Session = Depends(get_session)):
+    """Pass rate, failure class breakdown, and a daily trend, computed
+    directly from agent_runs. No model inference here — this is bookkeeping
+    over what diagnose/fork have already written, not a new prediction.
+    """
+    runs = session.exec(select(AgentRun)).all()
+    total = len(runs)
+    successes = sum(1 for r in runs if r.status == "success")
+
+    class_counts: dict[str, int] = {}
+    for r in runs:
+        if r.injected_class:
+            class_counts[r.injected_class] = class_counts.get(r.injected_class, 0) + 1
+    breakdown = [
+        FailureClassCount(injected_class=cls, count=n) for cls, n in sorted(class_counts.items())
+    ]
+
+    buckets: dict[str, list[AgentRun]] = defaultdict(list)
+    for r in runs:
+        buckets[r.created_at.date().isoformat()].append(r)
+
+    all_durations = [r.duration_ms for r in runs if r.duration_ms]
+    period_mean = statistics.fmean(all_durations) if all_durations else 0.0
+    period_std = statistics.pstdev(all_durations) if len(all_durations) > 1 else 0.0
+
+    trend: list[ReliabilityTrendPoint] = []
+    for day in sorted(buckets):
+        day_runs = buckets[day]
+        day_success = sum(1 for r in day_runs if r.status == "success")
+        day_durations = [r.duration_ms for r in day_runs if r.duration_ms]
+        day_mean = statistics.fmean(day_durations) if day_durations else 0.0
+        zscore = (day_mean - period_mean) / period_std if period_std > 0 else 0.0
+        trend.append(
+            ReliabilityTrendPoint(
+                date=day,
+                total_runs=len(day_runs),
+                success_count=day_success,
+                pass_rate=round(day_success / len(day_runs), 4) if day_runs else 0.0,
+                total_tokens=sum(r.total_tokens for r in day_runs),
+                avg_duration_ms=round(day_mean, 1),
+                duration_zscore=round(zscore, 3),
+            )
+        )
+
+    total_tokens = sum(r.total_tokens for r in runs)
+    rate_env = os.environ.get("TOKEN_COST_PER_1K_USD")
+    estimated_cost = (total_tokens / 1000.0) * float(rate_env) if rate_env else None
+
+    return ReliabilityResponse(
+        total_runs=total,
+        success_count=successes,
+        failure_count=total - successes,
+        overall_pass_rate=round(successes / total, 4) if total else 0.0,
+        failure_class_breakdown=breakdown,
+        trend=trend,
+        total_tokens=total_tokens,
+        estimated_cost_usd=round(estimated_cost, 4) if estimated_cost is not None else None,
+        cost_rate_configured=rate_env is not None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /ingest/otel — map a simplified OTel-like trace into the schema
+# ---------------------------------------------------------------------------
+
+
+def _classify_otel_span(span: OtelSpan) -> tuple[str, str | None]:
+    """Heuristic action_type + tool_name from a span's name/attributes.
+
+    There is no universal OTel semantic convention every agent framework
+    follows, so this reads the handful of attribute names LangChain/LangGraph
+    instrumentation and plain function-call spans commonly use, and falls
+    back to "decide" for anything that names neither a tool nor an LLM call.
+    """
+    name_lower = span.name.lower()
+    tool_name = span.attributes.get("tool.name") or span.attributes.get("function.name")
+    if tool_name or "tool" in name_lower:
+        return "call_tool", str(tool_name) if tool_name else span.name
+    if any(token in name_lower for token in ("llm", "completion", "chat", "generate")):
+        return "call_llm", None
+    return "decide", None
+
+
+@app.post("/ingest/otel", response_model=OtelIngestResponse)
+def ingest_otel(body: OtelIngestRequest, session: Session = Depends(get_session)):
+    """Map a simplified OTel-like trace into agent_runs + steps.
+
+    Not full OTLP — see OtelSpan's docstring. Spans are ordered by start time
+    into steps; `input.*` / `output.*` prefixed attributes become the step's
+    input/output payloads, and anything carrying `status_code: "ERROR"` sets
+    error_flag, which is enough for the detector to score the run exactly
+    like a synthetic one.
+    """
+    if not body.spans:
+        raise HTTPException(status_code=400, detail="trace has no spans")
+
+    ordered = sorted(body.spans, key=lambda s: s.start_time_unix_nano)
+    run = AgentRun(source="otel", task_type=body.task_type, status="failed")
+    session.add(run)
+    session.flush()
+
+    total_tokens = 0
+    total_duration = 0
+    any_error = False
+
+    for index, span in enumerate(ordered):
+        action_type, tool_name = _classify_otel_span(span)
+        duration_ms = max(0, (span.end_time_unix_nano - span.start_time_unix_nano) // 1_000_000)
+        tokens = int(span.attributes.get("llm.usage.total_tokens") or span.attributes.get("tokens") or 0)
+        error_flag = span.status_code.upper() == "ERROR"
+        any_error = any_error or error_flag
+        total_tokens += tokens
+        total_duration += int(duration_ms)
+
+        step_input = {k[len("input.") :]: v for k, v in span.attributes.items() if k.startswith("input.")}
+        step_output = {
+            k[len("output.") :]: v for k, v in span.attributes.items() if k.startswith("output.")
+        } or {"name": span.name}
+        snapshot = {"span_id": span.span_id, "attributes": span.attributes}
+
+        session.add(
+            Step(
+                run_id=run.id,
+                step_index=index,
+                action_type=action_type,
+                tool_name=tool_name,
+                input=step_input,
+                output=step_output,
+                state_snapshot=snapshot,
+                state_hash=state_hash(snapshot),
+                duration_ms=int(duration_ms),
+                tokens=tokens,
+                error_flag=error_flag,
+            )
+        )
+
+    run.status = "failed" if any_error else "success"
+    run.total_tokens = total_tokens
+    run.duration_ms = total_duration
+    session.add(run)
+    session.commit()
+
+    return OtelIngestResponse(run_id=run.id, steps_created=len(ordered), status=run.status)
